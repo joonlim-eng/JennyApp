@@ -1,12 +1,11 @@
-const { spawn } = require('child_process');
+const { exec } = require('child_process');
 
-// 윈도우 창 생성 없이 npx 명령을 백그라운드로 실행
-const metro = spawn('npx.cmd', ['expo', 'start', '--tunnel', '-c'], {
-  stdio: 'inherit',
-  windowsHide: true,
-  shell: true
-});
+// { windowsHide: true } 를 넣어야 화면에 QR코드 창이 새로 뜨지 않고 백그라운드에 숨습니다.
+const metro = exec('npx expo start --tunnel -c', { windowsHide: true });
 
-metro.on('close', (code) => {
+metro.stdout.on('data', (data) => console.log(data));
+metro.stderr.on('data', (data) => console.error(data));
+
+metro.on('exit', (code) => {
   console.log(`Metro process exited with code ${code}`);
 });
