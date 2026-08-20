@@ -5,7 +5,7 @@ module.exports = {
       script: "cmd.exe",
       args: "/c npx expo start --tunnel",
       windowsHide: true,
-      autorestart: true
+      autorestart: false
     },
     {
       name: "git-autopull",
