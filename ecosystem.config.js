@@ -9,6 +9,7 @@ module.exports = {
     {
       name: "git-autopull",
       script: "auto-pull.js",
+      windowsHide: true,
       autorestart: true
     }
   ]
