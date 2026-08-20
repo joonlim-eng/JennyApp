@@ -1,9 +1,10 @@
 const { spawn } = require('child_process');
 
-// --non-interactive 옵션을 추가하여 백그라운드 대기 상태(CommandError)를 방지합니다.
-const metro = spawn('npx.cmd', ['expo', 'start', '--tunnel', '--non-interactive', '-c'], {
+// CI=1 환경변수를 주입하여 백그라운드 대기 및 터널 키보드 입력을 자동으로 우회합니다.
+const metro = spawn('npx.cmd', ['expo', 'start', '--tunnel', '-c'], {
   windowsHide: true,
-  shell: true
+  shell: true,
+  env: { ...process.env, CI: '1' }
 });
 
 metro.stdout.on('data', (data) => console.log(data.toString()));
