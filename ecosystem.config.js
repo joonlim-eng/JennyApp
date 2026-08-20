@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "expo-metro",
       script: "npx",
-      args: "expo start --tunnel",
+      args: "expo start --tunnel -c",
       autorestart: true
     },
     {
