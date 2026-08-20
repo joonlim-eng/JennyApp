@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "expo-metro",
       script: "cmd.exe",
-      args: "/c npx expo start --tunnel -c",
+      args: "/c npx expo start --tunnel",
       windowsHide: true,
       autorestart: true
     },
