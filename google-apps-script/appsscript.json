@@ -1,0 +1,34 @@
+{
+  "timeZone": "America/Chicago",
+  "dependencies": {
+    "enabledAdvancedServices": [
+      {
+        "userSymbol": "Drive",
+        "serviceId": "drive",
+        "version": "v2"
+      }
+    ]
+  },
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "ANYONE_ANONYMOUS"
+  },
+  "exceptionLogging": "STACKDRIVER",
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.send_mail",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/script.container.ui"
+  ],
+  "runtimeVersion": "V8",
+  "sheets": {
+    "macros": [
+      {
+        "menuName": "bypassHidingA",
+        "functionName": "bypassHidingA",
+        "defaultShortcut": "Ctrl+Alt+Shift+1"
+      }
+    ]
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "JENNY",
+    "slug": "order-app",
+    "version": "1.0.86",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "order-app",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.anonymous.orderapp"
+    },
+    "web": {
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Camera access is needed to scan barcodes."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "620cfd6b-5d9c-4e17-8173-29104e61af9f"
+      }
+    }
+  }
+}
