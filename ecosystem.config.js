@@ -2,8 +2,8 @@ module.exports = {
   apps: [
     {
       name: "expo-metro",
-      script: "node_modules/expo/bin/cli",
-      args: "start --tunnel",
+      script: "cmd.exe",
+      args: "/c npx expo start --tunnel -c",
       windowsHide: true,
       autorestart: true
     },
