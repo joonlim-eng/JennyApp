@@ -844,18 +844,22 @@ const removeUser = useCallback(
         const isPrefixMatch = prefix && p.itemCode.toUpperCase().startsWith(prefix);
         
         if (isPrefixMatch) {
-          // 같은 시리즈는 설명 점수를 무시하고 무조건 100점으로 통일!
           score = 100; 
         } else {
-          // 다른 시리즈일 경우: 3글자 이상 단어의 "매칭 길이"와 "반복 횟수(빈도)"를 곱하여 점수 누적
+          const getBrand = (desc: string) => desc.trim().split(/\s+/)[0] || '';
+          const baseBrand = getBrand(product.description);
+          const targetBrand = getBrand(p.description);
+
+          if (baseBrand && baseBrand === targetBrand) {
+            score += 50;
+          }
+
           const pWords = p.description.toUpperCase();
           for (const w of words) {
-            // 해당 단어가 등장하는 횟수(빈도수) 계산
             const regex = new RegExp(w, 'g');
             const matches = pWords.match(regex);
             if (matches) {
               const count = matches.length;
-              // 단어 길이 * 반복 횟수만큼 점수 가중치 부여
               score += w.length * count;
             }
           }
