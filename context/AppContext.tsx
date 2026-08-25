@@ -851,7 +851,7 @@ const removeUser = useCallback(
           const targetBrand = getBrand(p.description);
 
           if (baseBrand && baseBrand === targetBrand) {
-            score += 50;
+            score += 500;
           }
 
           const pWords = p.description.toUpperCase();
