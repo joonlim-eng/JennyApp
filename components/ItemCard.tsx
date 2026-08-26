@@ -138,8 +138,6 @@ function haptic() {
             </Pressable>
           );
         })()}         
-          return (
-       
       </View>
       <ImageViewerModal
         visible={viewerOpen}
