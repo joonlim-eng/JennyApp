@@ -1182,17 +1182,36 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
       setShipToJBS(data.shipToJBS);
     }
 
-    // 4. Cart 아이템 복원 ({ upc, qty } 구조)
+    // 4. Cart 아이템 복원 ({ upc, qty, opt } 구조)
     if (Array.isArray(data.items)) {
+      const newOptions: Record<string, string> = {}; // 서버에서 온 옵션들을 모아둘 객체
+
       const newCart = data.items
         .filter((item: any) => item.upc && item.qty > 0)
-        .map((item: any) => ({
-          upc: String(item.upc),
-          qty: Number(item.qty),
-          vendorId: targetVendorId || '',
-        }));
+        .map((item: any) => {
+          const upcStr = String(item.upc);
+          const optStr = item.opt ? String(item.opt) : undefined;
+          
+          // 가져온 옵션 값이 있다면 newOptions에 기록
+          if (optStr) {
+            newOptions[upcStr] = optStr;
+          }
 
+          return {
+            upc: upcStr,
+            qty: Number(item.qty),
+            vendorId: targetVendorId || '',
+            opt: optStr, // 장바구니 아이템에 옵션값 박아 넣기
+          };
+        });
+
+      // 1. 장바구니(Cart) 상태 업데이트
       patch({ cart: newCart });
+
+      // 2. 앱 전역 옵션(selectedOptions) 상태에 일괄 적용시켜 ItemCard 등 UI에 반영
+      if (Object.keys(newOptions).length > 0) {
+        setSelectedOptions((prev) => ({ ...prev, ...newOptions }));
+      }
     }
 
     return { ok: true };
