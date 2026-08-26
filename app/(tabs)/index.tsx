@@ -109,9 +109,16 @@ export default function HomeScreen() {
   const buildOrderPayload = () => {
     const items = app.cart.map((c) => {
       const p = app.findByUpc(c.upc);
+      
+      const originalItemCode = p?.itemCode ?? '';
+      // 1. 첫 '/'가 나오기 직전까지 자르고 트림(공백 제거)
+      const baseCode = originalItemCode.split('/')[0].trim();
+      // 2 & 3. 선택된 옵션(c.opt)이 있으면 " / "와 함께 결합, 없으면 원본 코드 사용
+      const finalItemCode = c.opt ? `${baseCode} / ${c.opt}` : originalItemCode;
+
       return {
         upc: c.upc,
-        itemCode: p?.itemCode ?? '',
+        itemCode: finalItemCode,
         description: p?.description ?? '',
         cost: p?.cost ?? 0,
         qty: c.qty,
