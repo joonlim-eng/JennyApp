@@ -56,9 +56,10 @@ function haptic() {
 }
 
 // 1. 방어막이 쳐진 알맹이 UI (내 수량(qty)이 바뀌지 않으면 절대 다시 그리지 않음)
-const MemoizedCard = memo(({
-  product, onRelated, onDelete, showQty = true, qty, step, colors, fs, onSetQty, selectedOpt, onSelectOpt
-}: Props & { qty: number; step: number; colors: any; fs: number; onSetQty: (upc: string, q: number) => void; selectedOpt?: string; onSelectOpt: (upc: string, opt: string) => void }) => {
+  const MemoizedCard = memo(({
+  product, onRelated, onDelete, showQty = true, cartOption, qty, step, colors, fs, onSetQty, selectedOpt, onSelectOpt
+  }: Props & { qty: number; step: number; colors: any; fs: number; onSetQty: (upc: string, q: number) 
+  => void; selectedOpt?: string; onSelectOpt: (upc: string, opt: string) => void }) => {
   const [imageFailed, setImageFailed] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [qtyModalOpen, setQtyModalOpen] = useState(false);
@@ -110,22 +111,35 @@ const MemoizedCard = memo(({
         {(() => {
           const { options } = parseItemOptions(product.itemCode);
           if (options.length === 0) return null;
+          
+          const isCart = cartOption !== undefined;
+          
           return (
             <Pressable
               onPress={() => {
+                if (isCart) return;
                 haptic();
                 const currentIndex = options.indexOf(selectedOpt || options[0]);
                 const nextIndex = (currentIndex + 1) % options.length;
                 onSelectOpt(product.upc, options[nextIndex]);
               }}
-              style={[styles.dropdownBtn, { backgroundColor: colors.muted, borderColor: colors.border }]}
+              disabled={isCart}
+              style={[
+                styles.dropdownBtn,
+                // maxWidth: 64 를 추가하여 위쪽 이미지 크기와 맞추고 버튼이 좌우로 팽창하는 것을 막습니다.
+                { backgroundColor: colors.muted, borderColor: colors.border, maxWidth: 64 },
+                isCart && { borderWidth: 0, backgroundColor: 'transparent', paddingVertical: 0 }
+              ]}
             >
-              <Text style={[styles.dropdownText, { color: colors.foreground, fontSize: 10 * fs }]} numberOfLines={1}>
+              {/* numberOfLines를 2로 변경하여 공간이 좁을 때 텍스트가 자동으로 두 줄로 쪼개지게 합니다. */}
+              <Text style={[styles.dropdownText, { color: colors.foreground, fontSize: 10 * fs }]} numberOfLines={2}>
                 {selectedOpt || options[0]}
               </Text>
             </Pressable>
           );
-        })()}
+        })()}         
+          return (
+       
       </View>
       <ImageViewerModal
         visible={viewerOpen}
