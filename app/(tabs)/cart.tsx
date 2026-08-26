@@ -25,10 +25,13 @@ export default function CartScreen() {
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const items = React.useMemo(() => {
-  return app.cart
-    .map((c) => app.findByUpc(c.upc))
-    .filter(Boolean) as Product[];
-    }, [app.cart]);
+    return app.cart
+      .map((c) => {
+        const p = app.findByUpc(c.upc);
+        return p ? { product: p, opt: c.opt } : null;
+      })
+      .filter(Boolean) as { product: Product; opt?: string }[];
+  }, [app.cart]);
 
   const store = app.stores.find((s) => s.id === app.selectedStoreId);
   const vendor = app.vendors.find((v) => v.id === app.selectedVendorId);
@@ -103,14 +106,15 @@ export default function CartScreen() {
 
       <FlatList
         data={items}
-        keyExtractor={(p) => p.upc}
+        keyExtractor={(item) => `${item.product.upc}-${item.opt || 'none'}`}
         contentContainerStyle={styles.list}
         renderItem={({ item }) => (
           <ItemCard
-            product={item}
+            product={item.product}
+            cartOption={item.opt} // 장바구니에 담긴 고정 옵션 전달
             // 넘어갈 때 relatedUpc 라는 이름으로 바코드 번호를 함께 전송
-            onRelated={() => router.push({ pathname: '/(tabs)/scan', params: { relatedUpc: item.upc } })}
-            onDelete={(upc) => app.setQty(upc, 0)}
+            onRelated={() => router.push({ pathname: '/(tabs)/scan', params: { relatedUpc: item.product.upc } })}
+            onDelete={(upc) => app.setQty(upc, 0, item.opt)}
           />
         )}
         initialNumToRender={8}

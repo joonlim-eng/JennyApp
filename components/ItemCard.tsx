@@ -16,14 +16,40 @@ import * as Haptics from 'expo-haptics';
 import { resolveImageUrl } from '@/lib/driveImage';
 import ImageViewerModal from '@/components/ImageViewerModal';
 
+// --- 파싱 및 단가 계산 유틸 함수 ---
+function parseItemOptions(itemCode: string) {
+  const parts = itemCode.split('/');
+  if (parts.length < 2) return { baseCode: itemCode.trim(), options: [] };
+  const baseCode = parts[0].trim();
+  const options = parts.slice(1).map((p) => p.trim()).filter(Boolean);
+  return { baseCode, options };
+}
+
+function getMultiplier(option: string) {
+  const match = option.match(/\((\d+)\)/);
+  return match ? parseInt(match[1], 10) : 1;
+}
+
+function calcPrice(cost: number, itemCode: string, selectedOpt?: string) {
+  const { options } = parseItemOptions(itemCode);
+  if (options.length === 0) return cost;
+  
+  const baseMult = getMultiplier(options[0]);
+  const unitPrice = cost / baseMult;
+  const targetMult = selectedOpt ? getMultiplier(selectedOpt) : baseMult;
+  
+  return unitPrice * targetMult;
+}
+
 interface Props {
   product: Product;
   onRelated: (p: Product) => void;
   onDelete?: (upc: string) => void;
   showQty?: boolean;
+  cartOption?: string; // 카트 화면용 고정 옵션
 }
 
-function haptic() {
+function haptic() { 
   if (Platform.OS !== 'web') {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   }
@@ -31,8 +57,8 @@ function haptic() {
 
 // 1. 방어막이 쳐진 알맹이 UI (내 수량(qty)이 바뀌지 않으면 절대 다시 그리지 않음)
 const MemoizedCard = memo(({
-  product, onRelated, onDelete, showQty = true, qty, step, colors, fs, onSetQty
-}: Props & { qty: number; step: number; colors: any; fs: number; onSetQty: (upc: string, q: number) => void }) => {
+  product, onRelated, onDelete, showQty = true, qty, step, colors, fs, onSetQty, selectedOpt, onSelectOpt
+}: Props & { qty: number; step: number; colors: any; fs: number; onSetQty: (upc: string, q: number) => void; selectedOpt?: string; onSelectOpt: (upc: string, opt: string) => void }) => {
   const [imageFailed, setImageFailed] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [qtyModalOpen, setQtyModalOpen] = useState(false);
@@ -57,27 +83,50 @@ const MemoizedCard = memo(({
 
   return (
     <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <Pressable
-        onPress={() => {
-          if (imageUri && !imageFailed) {
-            haptic();
-            setViewerOpen(true);
-          }
-        }}
-        style={[styles.imageBox, { backgroundColor: colors.muted }]}
-        testID={`image-${product.upc}`}
-      >
-        {imageUri && !imageFailed ? (
-          <Image
-            source={{ uri: imageUri }}
-            style={styles.image}
-            resizeMode="cover"
-            onError={() => setImageFailed(true)}
-          />
-        ) : (
-          <MaterialCommunityIcons name="package-variant-closed" size={28} color={colors.mutedForeground} />
-        )}
-      </Pressable>
+      <View style={styles.imageColumn}>
+        <Pressable
+          onPress={() => {
+            if (imageUri && !imageFailed) {
+              haptic();
+              setViewerOpen(true);
+            }
+          }}
+          style={[styles.imageBox, { backgroundColor: colors.muted }]}
+          testID={`image-${product.upc}`}
+        >
+          {imageUri && !imageFailed ? (
+            <Image
+              source={{ uri: imageUri }}
+              style={styles.image}
+              resizeMode="cover"
+              onError={() => setImageFailed(true)}
+            />
+          ) : (
+            <MaterialCommunityIcons name="package-variant-closed" size={28} color={colors.mutedForeground} />
+          )}
+        </Pressable>
+
+        {/* 슬래시가 있는 경우에만 표시되는 패키지 드롭다운 버튼 */}
+        {(() => {
+          const { options } = parseItemOptions(product.itemCode);
+          if (options.length === 0) return null;
+          return (
+            <Pressable
+              onPress={() => {
+                haptic();
+                const currentIndex = options.indexOf(selectedOpt || options[0]);
+                const nextIndex = (currentIndex + 1) % options.length;
+                onSelectOpt(product.upc, options[nextIndex]);
+              }}
+              style={[styles.dropdownBtn, { backgroundColor: colors.muted, borderColor: colors.border }]}
+            >
+              <Text style={[styles.dropdownText, { color: colors.foreground, fontSize: 10 * fs }]} numberOfLines={1}>
+                {selectedOpt || options[0]}
+              </Text>
+            </Pressable>
+          );
+        })()}
+      </View>
       <ImageViewerModal
         visible={viewerOpen}
         uri={fullImageUri}
@@ -146,14 +195,14 @@ const MemoizedCard = memo(({
           )}
         </View>
         <Text style={[styles.meta, { color: colors.mutedForeground, fontSize: 12 * fs, fontFamily: 'Inter_700Bold' }]}>
-          #{product.itemCode}
+          #{parseItemOptions(product.itemCode).baseCode}
         </Text>
         <Text style={[styles.meta, { color: colors.mutedForeground, fontSize: 12 * fs }]}>
           {product.upc}
         </Text>
         <View style={styles.bottomRow}>
           <Text style={[styles.cost, { color: colors.accent, fontSize: 15 * fs }]}>
-            ${Number(product.cost || 0).toFixed(2)}
+            ${calcPrice(Number(product.cost || 0), product.itemCode, selectedOpt).toFixed(2)}
           </Text>
           <View style={styles.actions}>
             <Pressable
@@ -208,8 +257,7 @@ const MemoizedCard = memo(({
     </View>
   );
 }, (prev, next) => {
-  // 핵심 방어막: 카트에 담긴 개수(qty)가 이전과 똑같으면 화면을 절대 다시 그리지 않음!
-  return prev.qty === next.qty && prev.product.upc === next.product.upc;
+  return prev.qty === next.qty && prev.product.upc === next.product.upc && prev.selectedOpt === next.selectedOpt;
 });
 
 
@@ -217,10 +265,14 @@ const MemoizedCard = memo(({
 export default function ItemCard(props: Props) {
   const colors = useColors();
   const fs = useFontScale();
-  const { qtyOf, setQty, vendors } = useApp();
+  const { qtyOf, setQty, vendors, itemOptionOf, setItemOption } = useApp();
   
-  const qty = qtyOf(props.product.upc);
   const step = vendors.find((v) => v.id === props.product.vendorId)?.qtyStep || 1;
+  
+  // 장바구니 화면이면 넘어온 고정 옵션을 사용하고, 스캔 화면이면 선택된 옵션 상태를 사용합니다.
+  const selectedOpt = props.cartOption !== undefined ? props.cartOption : (itemOptionOf ? itemOptionOf(props.product.upc) : undefined);
+  
+  const qty = qtyOf(props.product.upc, selectedOpt);
 
   return (
     <MemoizedCard
@@ -229,10 +281,13 @@ export default function ItemCard(props: Props) {
       step={step}
       colors={colors}
       fs={fs}
-      onSetQty={setQty}
+      // 수정: 수량 세팅 시에도 선택된 옵션을 함께 넘깁니다.
+      onSetQty={(upc, q) => setQty(upc, q, selectedOpt)}
+      selectedOpt={selectedOpt}
+      onSelectOpt={setItemOption}
     />
   );
-}
+} 
 
 const styles = StyleSheet.create({
   card: {
@@ -253,6 +308,20 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   image: { width: '100%', height: '100%' },
+  // 드롭다운 스타일 수정: 텍스트 중앙 정렬, 여백 조정, 폰트 웨이트 변경
+  dropdownBtn: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    marginTop: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdownText: {
+    fontFamily: 'Inter_700Bold', // Bold 처리
+    textAlign: 'center',         // 중앙 정렬
+  },
   info: { flex: 1 },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 6 },
   desc: { flex: 1, fontFamily: 'Inter_600SemiBold' },

@@ -73,7 +73,34 @@ export interface CartItem {
   upc: string;
   qty: number;
   vendorId: string;
+  opt?: string; // 7 Dollar 수량 옵션
 }
+
+// 7 Dollar Unit Price
+export function parseItemOptions(itemCode: string) {
+  const parts = itemCode.split('/');
+  if (parts.length < 2) return { baseCode: itemCode.trim(), options: [] };
+  const baseCode = parts[0].trim();
+  const options = parts.slice(1).map((p) => p.trim()).filter(Boolean);
+  return { baseCode, options };
+}
+
+export function getMultiplier(option: string) {
+  const match = option.match(/\((\d+)\)/);
+  return match ? parseInt(match[1], 10) : 1; // 괄호가 없으면(예: Each) 1로 처리
+}
+
+export function calcPrice(cost: number, itemCode: string, selectedOpt?: string) {
+  const { options } = parseItemOptions(itemCode);
+  if (options.length === 0) return cost; // 슬래시가 없는 일반 상품
+  
+  const baseMult = getMultiplier(options[0]); // 첫 번째 옵션의 괄호 안 숫자
+  const unitPrice = cost / baseMult;          // 낱개 단가
+  const targetMult = selectedOpt ? getMultiplier(selectedOpt) : baseMult;
+  
+  return unitPrice * targetMult; // 최종 가격
+}
+// 7Dollar Unit
 
 export interface SavedCart {
   id: string;
@@ -244,7 +271,7 @@ interface AppContextValue extends AppState {
   // cart & scan
   addToScanList: (upc: string) => void;
   removeFromScanList: (upc: string) => void;
-  setQty: (upc: string, qty: number) => void;
+  setQty: (upc: string, qty: number, opt?: string) => void;
   clearCart: () => void;
   cartTotal: number;
   qtyOf: (upc: string) => number;
@@ -270,6 +297,8 @@ interface AppContextValue extends AppState {
   // sheet operations
   getTabList?: () => Promise<{ ok: boolean; tabs?: { label: string; value: string }[]; message?: string }>;
   importFromSheet?: (tabName: string) => Promise<{ ok: boolean; message?: string }>;
+  itemOptionOf?: (upc: string) => string | undefined;
+  setItemOption?: (upc: string, opt: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -293,6 +322,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     seedVersion: SEED_VERSION,
   });
   const [loading, setLoading] = useState(true);
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
+
+  const itemOptionOf = useCallback((upc: string) => {
+    return selectedOptions[upc];
+  }, [selectedOptions]);
+
+  const setItemOption = useCallback((upc: string, opt: string) => {
+    setSelectedOptions((prev) => ({ ...prev, [upc]: opt }));
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -746,11 +784,11 @@ const removeUser = useCallback(
 );
 
   const qtyOf = useCallback(
-  (upc: string) => {
+  (upc: string, opt?: string) => {
     if (!state.selectedVendorId) return 0;
     return (
       state.cart.find(
-        (c) => c.upc === upc && c.vendorId === state.selectedVendorId
+        (c) => c.upc === upc && c.vendorId === state.selectedVendorId && c.opt === opt
       )?.qty ?? 0
     );
   },
@@ -785,27 +823,27 @@ const removeUser = useCallback(
 );
 
   const setQty = useCallback(
-  (upc: string, qty: number) => {
+  (upc: string, qty: number, opt?: string) => {
     const currentVendorId = stateRef.current.selectedVendorId;
     if (!currentVendorId) return;
 
     setState((prev) => {
       const q = Math.max(0, qty);
       const exists = prev.cart.some(
-        (c) => c.upc === upc && c.vendorId === currentVendorId
+        (c) => c.upc === upc && c.vendorId === currentVendorId && c.opt === opt
       );
       let cart: CartItem[];
 
       if (q === 0) {
         cart = prev.cart.filter(
-          (c) => !(c.upc === upc && c.vendorId === currentVendorId)
+          (c) => !(c.upc === upc && c.vendorId === currentVendorId && c.opt === opt)
         );
       } else if (exists) {
         cart = prev.cart.map((c) =>
-          c.upc === upc && c.vendorId === currentVendorId ? { ...c, qty: q } : c
+          c.upc === upc && c.vendorId === currentVendorId && c.opt === opt ? { ...c, qty: q } : c
         );
       } else {
-        cart = [...prev.cart, { upc, qty: q, vendorId: currentVendorId }];
+        cart = [...prev.cart, { upc, qty: q, vendorId: currentVendorId, opt }];
       }
       return { ...prev, cart };
     });
@@ -822,7 +860,10 @@ const removeUser = useCallback(
   return state.cart.reduce((sum, c) => {
     // $O(1)$ 캐싱
     const p = productDict[`${c.upc}_${c.vendorId}`];
-    return sum + (p ? p.cost * c.qty : 0);
+    if (!p) return sum;
+    // 파싱 함수를 태워 정확한 단가 계산
+    const price = calcPrice(p.cost, p.itemCode, c.opt);
+    return sum + (price * c.qty);
   }, 0);
 }, [state.cart, productDict]);
 
@@ -1465,6 +1506,8 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
     syncVendorProducts,
     forceLogoutAll,
     genId,
+    itemOptionOf,
+    setItemOption,
   };
 
   return <AppContext.Provider value={{ ...value, getTabList, importFromSheet }}>{children}</AppContext.Provider>;
