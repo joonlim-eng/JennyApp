@@ -270,7 +270,7 @@ interface AppContextValue extends AppState {
   setShipToJBS: (v: boolean) => void;
   // cart & scan
   addToScanList: (upc: string) => void;
-  removeFromScanList: (upc: string) => void;
+  removeFromScanList: (upc: string, opt?: string) => void;
   setQty: (upc: string, qty: number, opt?: string) => void;
   clearCart: () => void;
   cartTotal: number;
@@ -810,14 +810,29 @@ const removeUser = useCallback(
   );
 
   const removeFromScanList = useCallback(
-  (upc: string) => {
-    setState((prev) => ({
-      ...prev,
-      scanList: prev.scanList.filter((u) => u !== upc),
-      cart: prev.cart.filter(
-        (c) => !(c.upc === upc && c.vendorId === prev.selectedVendorId)
-      ),
-    }));
+  (upc: string, opt?: string) => {
+    setState((prev) => {
+      // 1. 해당 옵션만 카트에서 우선 제거
+      const newCart = prev.cart.filter(
+        (c) => !(c.upc === upc && c.vendorId === prev.selectedVendorId && c.opt === opt)
+      );
+      
+      // 2. 해당 바코드의 다른 옵션이 아직 카트에 남아있는지 확인
+      const stillHasOtherOptions = newCart.some(
+        (c) => c.upc === upc && c.vendorId === prev.selectedVendorId
+      );
+      
+      // 3. 다른 옵션마저 없다면 스캔 리스트(화면)에서도 카드 제거
+      const newScanList = stillHasOtherOptions
+        ? prev.scanList
+        : prev.scanList.filter((u) => u !== upc);
+
+      return {
+        ...prev,
+        scanList: newScanList,
+        cart: newCart,
+      };
+    });
   },
   [],
 );

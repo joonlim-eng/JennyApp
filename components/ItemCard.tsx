@@ -44,7 +44,7 @@ function calcPrice(cost: number, itemCode: string, selectedOpt?: string) {
 interface Props {
   product: Product;
   onRelated: (p: Product) => void;
-  onDelete?: (upc: string) => void;
+  onDelete?: (upc: string, opt?: string) => void;
   showQty?: boolean;
   cartOption?: string; // 카트 화면용 고정 옵션
 }
@@ -226,7 +226,7 @@ function haptic() {
             </Pressable>
             {onDelete && qty > 0 && (
               <Pressable
-                onPress={() => { haptic(); onDelete(product.upc); }}
+                onPress={() => { haptic(); onDelete(product.upc, selectedOpt); }}
                 style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
                 testID={`delete-${product.upc}`}
               >
