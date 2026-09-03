@@ -897,36 +897,43 @@ const removeUser = useCallback(
       const pool = state.products.filter(
         (p) => p.vendorId === product.vendorId
       );
+const specialVendors = ['7 DOLLAR']; // 향후 추가 벤더 확장 자리 (OR 조건)
+      const isSpecialVendor = specialVendors.includes(product.vendorId);
 
       const scored = pool.map((p) => {
         let score = 0;
         const isPrefixMatch = prefix && p.itemCode.toUpperCase().startsWith(prefix);
         
         if (isPrefixMatch) {
-          score = 10000; 
-        } else {
-          const getBrand = (desc: string) => desc.trim().split(/\s+/)[0] || '';
-          const baseBrand = getBrand(product.description);
-          const targetBrand = getBrand(p.description);
+          score += 10000; 
+        }
+        
+        if (!isSpecialVendor && isPrefixMatch) {
+          return { p, score };
+        }
 
-          if (baseBrand && baseBrand === targetBrand) {
-            score += 500;
-          }
+        // 특정 벤더(7 DOLLAR 등)이거나, 일반 벤더지만 접두사가 불일치할 때 알파 점수(+α) 계산
+        const getBrand = (desc: string) => desc.trim().split(/\s+/)[0] || '';
+        const baseBrand = getBrand(product.description);
+        const targetBrand = getBrand(p.description);
 
-          const pWords = p.description.toUpperCase();
-          for (const w of words) {
-            const regex = new RegExp(w, 'g');
-            const matches = pWords.match(regex);
-            if (matches) {
-              const count = matches.length;
-              score += w.length * count;
-            }
+        if (baseBrand && baseBrand === targetBrand) {
+          score += 500;
+        }
+
+        const pWords = p.description.toUpperCase();
+        for (const w of words) {
+          const regex = new RegExp(w, 'g');
+          const matches = pWords.match(regex);
+          if (matches) {
+            const count = matches.length;
+            score += w.length * count;
           }
         }
         
         return { p, score };
       });
-
+      
       return scored
         .filter((s) => s.score > 0)
         .sort((a, b) => {
