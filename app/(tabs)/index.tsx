@@ -109,9 +109,21 @@ export default function HomeScreen() {
   const buildOrderPayload = () => {
     const items = app.cart.map((c) => {
       const p = app.findByUpc(c.upc);
+      
+      const originalItemCode = p?.itemCode ?? '';
+      const parts = originalItemCode.split('/');
+      const baseCode = parts[0].trim();
+      
+      // 1. 선택된 옵션이 없으면, 원본 코드의 첫 번째 옵션을 기본값으로 가져옵니다.
+      const defaultOpt = parts.length > 1 ? parts[1].trim() : '';
+      const activeOpt = c.opt || defaultOpt;
+
+      // 2. 최종 옵션(activeOpt)이 존재하면 결합하고, 아예 옵션이 없는 상품이면 baseCode만 사용합니다.
+      const finalItemCode = activeOpt ? `${baseCode} / ${activeOpt}` : baseCode;
+
       return {
         upc: c.upc,
-        itemCode: p?.itemCode ?? '',
+        itemCode: finalItemCode,
         description: p?.description ?? '',
         cost: p?.cost ?? 0,
         qty: c.qty,

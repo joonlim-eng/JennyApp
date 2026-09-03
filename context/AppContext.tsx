@@ -273,7 +273,7 @@ interface AppContextValue extends AppState {
   setShipToJBS: (v: boolean) => void;
   // cart & scan
   addToScanList: (upc: string) => void;
-  removeFromScanList: (upc: string) => void;
+  removeFromScanList: (upc: string, opt?: string) => void;
   setQty: (upc: string, qty: number, opt?: string) => void;
   clearCart: () => void;
   cartTotal: number;
@@ -813,14 +813,29 @@ const removeUser = useCallback(
   );
 
   const removeFromScanList = useCallback(
-  (upc: string) => {
-    setState((prev) => ({
-      ...prev,
-      scanList: prev.scanList.filter((u) => u !== upc),
-      cart: prev.cart.filter(
-        (c) => !(c.upc === upc && c.vendorId === prev.selectedVendorId)
-      ),
-    }));
+  (upc: string, opt?: string) => {
+    setState((prev) => {
+      // 1. 해당 옵션만 카트에서 우선 제거
+      const newCart = prev.cart.filter(
+        (c) => !(c.upc === upc && c.vendorId === prev.selectedVendorId && c.opt === opt)
+      );
+      
+      // 2. 해당 바코드의 다른 옵션이 아직 카트에 남아있는지 확인
+      const stillHasOtherOptions = newCart.some(
+        (c) => c.upc === upc && c.vendorId === prev.selectedVendorId
+      );
+      
+      // 3. 다른 옵션마저 없다면 스캔 리스트(화면)에서도 카드 제거
+      const newScanList = stillHasOtherOptions
+        ? prev.scanList
+        : prev.scanList.filter((u) => u !== upc);
+
+      return {
+        ...prev,
+        scanList: newScanList,
+        cart: newCart,
+      };
+    });
   },
   [],
 );
@@ -1185,17 +1200,36 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
       setShipToJBS(data.shipToJBS);
     }
 
-    // 4. Cart 아이템 복원 ({ upc, qty } 구조)
+    // 4. Cart 아이템 복원 ({ upc, qty, opt } 구조)
     if (Array.isArray(data.items)) {
+      const newOptions: Record<string, string> = {}; // 서버에서 온 옵션들을 모아둘 객체
+
       const newCart = data.items
         .filter((item: any) => item.upc && item.qty > 0)
-        .map((item: any) => ({
-          upc: String(item.upc),
-          qty: Number(item.qty),
-          vendorId: targetVendorId || '',
-        }));
+        .map((item: any) => {
+          const upcStr = String(item.upc);
+          const optStr = item.opt ? String(item.opt) : undefined;
+          
+          // 가져온 옵션 값이 있다면 newOptions에 기록
+          if (optStr) {
+            newOptions[upcStr] = optStr;
+          }
 
+          return {
+            upc: upcStr,
+            qty: Number(item.qty),
+            vendorId: targetVendorId || '',
+            opt: optStr, // 장바구니 아이템에 옵션값 박아 넣기
+          };
+        });
+
+      // 1. 장바구니(Cart) 상태 업데이트
       patch({ cart: newCart });
+
+      // 2. 앱 전역 옵션(selectedOptions) 상태에 일괄 적용시켜 ItemCard 등 UI에 반영
+      if (Object.keys(newOptions).length > 0) {
+        setSelectedOptions((prev) => ({ ...prev, ...newOptions }));
+      }
     }
 
     return { ok: true };

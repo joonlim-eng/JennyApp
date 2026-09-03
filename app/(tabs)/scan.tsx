@@ -286,7 +286,7 @@ const listData = React.useMemo(() => {
           <ItemCard
           product={item}
           onRelated={handleRelated}
-          onDelete={app.removeFromScanList}
+          onDelete={(upc, opt) => app.removeFromScanList(upc, opt)}
       />
   )}
       initialNumToRender={8}
