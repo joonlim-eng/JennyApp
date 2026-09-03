@@ -888,7 +888,7 @@ const removeUser = useCallback(
         const isPrefixMatch = prefix && p.itemCode.toUpperCase().startsWith(prefix);
         
         if (isPrefixMatch) {
-          score = 100; 
+          score = 10000; 
         } else {
           const getBrand = (desc: string) => desc.trim().split(/\s+/)[0] || '';
           const baseBrand = getBrand(product.description);
