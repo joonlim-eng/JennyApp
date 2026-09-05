@@ -35,7 +35,8 @@
         {
           "cameraPermission": "Camera access is needed to scan barcodes."
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,
