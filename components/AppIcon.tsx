@@ -224,18 +224,41 @@ const MCI: Record<string, React.ReactNode> = {
       <Line x1={12} y1={22.08} x2={12} y2={12} />
     </>
   ),
+  camera: (
+    <>
+      <Path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <Circle cx={12} cy={13} r={4} />
+    </>
+  ),
+  'camera-off': (
+    <>
+      <Line x1={1} y1={1} x2={23} y2={23} />
+      <Path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34m-7.72-2.06a4 4 0 1 1-5.56-5.56" />
+    </>
+  ),
 };
 
 function makeIconComponent(map: Record<string, React.ReactNode>, label: string) {
+
   return function Icon({ name, size = 24, color = '#000', style }: IconProps) {
+
     const glyph = map[name];
+
     if (!glyph) {
+
       if (__DEV__) console.warn(`AppIcon: missing ${label} icon "${name}"`);
+
       return <S size={size} color={color} style={style}><Circle cx={12} cy={12} r={9} /></S>;
+
     }
+
     return <S size={size} color={color} style={style}>{glyph}</S>;
+
   };
-}
+
+} 
+
+
 
 export const Feather = makeIconComponent(FEATHER, 'Feather');
 export const MaterialCommunityIcons = makeIconComponent(MCI, 'MaterialCommunityIcons');
