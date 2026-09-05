@@ -281,8 +281,12 @@ export default function ItemCard(props: Props) {
   
   const step = vendors.find((v) => v.id === props.product.vendorId)?.qtyStep || 1;
   
-  // 장바구니 화면이면 넘어온 고정 옵션을 사용하고, 스캔 화면이면 선택된 옵션 상태를 사용합니다.
-  const selectedOpt = props.cartOption !== undefined ? props.cartOption : (itemOptionOf ? itemOptionOf(props.product.upc) : undefined);
+  const { options } = parseItemOptions(props.product.itemCode);
+  const defaultOpt = options.length > 0 ? options[0] : undefined;
+  
+  const selectedOpt = props.cartOption !== undefined 
+    ? props.cartOption 
+    : (itemOptionOf ? (itemOptionOf(props.product.upc) || defaultOpt) : defaultOpt);
   
   const qty = qtyOf(props.product.upc, selectedOpt);
 
@@ -293,13 +297,12 @@ export default function ItemCard(props: Props) {
       step={step}
       colors={colors}
       fs={fs}
-      // 수정: 수량 세팅 시에도 선택된 옵션을 함께 넘깁니다.
       onSetQty={(upc, q) => setQty(upc, q, selectedOpt)}
       selectedOpt={selectedOpt}
       onSelectOpt={setItemOption}
     />
   );
-} 
+}
 
 const styles = StyleSheet.create({
   card: {
