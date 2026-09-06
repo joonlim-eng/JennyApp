@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@/components/AppIcon';
 import { useColors } from '@/hooks/useColors';
-import { useApp, useFontScale } from '@/context/AppContext';
+import { useApp, useFontScale, calcPrice } from '@/context/AppContext';
 import Dropdown from '@/components/Dropdown';
 
 function notify(title: string, msg: string) {
@@ -119,17 +119,22 @@ export default function HomeScreen() {
       const activeOpt = c.opt || defaultOpt;
 
       // 2. 최종 옵션(activeOpt)이 존재하면 결합하고, 아예 옵션이 없는 상품이면 baseCode만 사용합니다.
-      const finalItemCode = activeOpt ? `${baseCode} / ${activeOpt}` : baseCode;
+          const finalItemCode = activeOpt ? `${baseCode} / ${activeOpt}` : baseCode;
+          
+          // 3. 옵션이 있는 경우에만 calcPrice 연산 적용 (나머지는 bypass하여 속도 최적화)
+          const baseCost = p?.cost ?? 0;
+          const finalPrice = activeOpt ? calcPrice(baseCost, originalItemCode, c.opt) : baseCost;
 
-      return {
-        upc: c.upc,
-        itemCode: finalItemCode,
-        description: p?.description ?? '',
-        cost: p?.cost ?? 0,
-        qty: c.qty,
-        amount: (p?.cost ?? 0) * c.qty,
-      };
-    });
+          return {
+            upc: c.upc,
+            itemCode: finalItemCode,
+            description: p?.description ?? '',
+            cost: finalPrice,
+            qty: c.qty,
+            amount: finalPrice * c.qty,
+          };
+        });
+        
     return {
       v: app.appVersion,
       type: 'order',
