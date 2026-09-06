@@ -19,7 +19,9 @@
     "expo-file-system": "~57.0.6",
     "expo-sharing": "~57.0.18",
     "react": "19.2.3",
-    "react-native": "0.86.3"
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-app": "^1.0.0"
   },
   "devDependencies": {
     "@babel/core": "7.29.7",
