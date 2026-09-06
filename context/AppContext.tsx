@@ -14,7 +14,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AppState as RNAppState } from 'react-native';
+import { AppState as RNAppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
@@ -466,7 +466,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, [loading, completeGoogleLogin]);
 
-  const loginWithGoogle = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
+    const loginWithGoogle = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
     const base = state.settings.appsScriptUrl.trim();
     if (!base) {
       return { ok: false, error: 'Google connection is not set up.\nSETTING > Google Connection에 Apps Script URL을 먼저 등록하세요.' };
@@ -495,6 +495,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         `&redirect_uri=${encodeURIComponent(cfg.redirectUri || base)}` +
         '&response_type=code&scope=openid%20email&prompt=select_account' +
         `&state=${stateParam}`;
+
+      if (Platform.OS === 'web') {
+        window.location.href = authUrl;
+        return { ok: true };
+      }
+
       const res = await WebBrowser.openAuthSessionAsync(authUrl, redirect);
       if (res.type !== 'success' || !('url' in res) || !res.url) {
         // the deep-link handler may still complete the login if the app was
