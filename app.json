@@ -24,6 +24,9 @@
       "package": "com.anonymous.orderapp"
     },
     "web": {
+      "bundler": "metro",
+      "output": "static",
+      "display": "standalone",
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
