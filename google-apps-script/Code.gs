@@ -1,15 +1,34 @@
-// 최종 수정: 2026-08-09 10:44 PM(CT) 배포
+// 최종 수정: 2026-09-06 11:02 AM(CT) 배포
 var SS = SpreadsheetApp.getActiveSpreadsheet();
-/* ====================== Version Verification ====================== */
-
-/* ============================== GET ============================== */
-
 function doGet(e) {
   
   var action = (e && e.parameter && e.parameter.action) || '';
+  
+  // 구글이 로그인 완료 후 코드를 들고 돌아오는 요청인지 확인 (VIP 패스)
+  var isOAuthRedirect = (e && e.parameter && e.parameter.code && !action);
+
+  // 구글 복귀 요청이 아닐 때만 입구컷 검사 실행
+  if (!isOAuthRedirect) {
+    //입구컷 시작
+    var shApp = SS.getSheetByName('APPEARANCE');
+    var serverVer = shApp ? String(shApp.getRange('G1').getValue() || '').trim() : '';
+    var clientVer = String((e && e.parameter && e.parameter.v) || '').trim();
+
+    // 앱 버전이 서버 D1 값과 안 맞으면 로그인/데이터 처리 단 한 줄도 실행 안 하고 즉시 차단
+    if (serverVer && clientVer !== serverVer) {
+      return json_({ 
+        ok: false, 
+        error: 'UPDATE_REQUIRED', 
+        message: 'Please update to the latest version' 
+      });
+    }
+    //입구컷 완료
+  }
+
   try {
-    // Google 로그인 복귀 (action이 없을 때만 — authresult 등 JSON 요청도 code 파라미터를 쓰므로)
-    if (e && e.parameter && e.parameter.code && !action) return handleOAuthRedirect_(e);
+    // Google 로그인 복귀 (VIP 패스로 들어온 경우 바로 리다이렉트 실행)
+    if (isOAuthRedirect) return handleOAuthRedirect_(e);
+    
     if (action === 'authcfg') {
       var cid = PropertiesService.getScriptProperties().getProperty('OAUTH_CLIENT_ID') || '';
       return json_({ clientId: cid, redirectUri: ScriptApp.getService().getUrl() });
@@ -36,20 +55,41 @@ function doGet(e) {
     return json_({ error: String(err) });
   }
 }
-
 /* ============================== POST ============================= */
 
 function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
+    
+    //입구컷 시작
+    var shApp = SS.getSheetByName('APPEARANCE');
+    var serverVer = shApp ? String(shApp.getRange('G1').getValue() || '').trim() : '';
+    // POST 요청은 body.v 또는 URL 파라미터(e.parameter.v)에서 버전을 확인합니다.
+    var clientVer = String(body.v || (e && e.parameter && e.parameter.v) || '').trim();
+
+    // 앱 버전이 서버 D1 값과 안 맞으면 주문/데이터 처리 단 한 줄도 실행 안 하고 즉시 차단
+    if (serverVer && clientVer !== serverVer) {
+      return json_({ 
+        ok: false, 
+        error: 'UPDATE REQUIRED', 
+        message: 'Please update to the latest version' 
+      });
+    }
+    //입구컷 완료
+
     var action = body.action || 'order';
     if (action === 'requestAccess') return json_(requestAccess_(body));
     if (action === 'approveUser') return json_(approveUser_(body));
     if (action === 'activateUser') return json_(activateUser_(body));
     if (action === 'saveAppearance') return json_(saveAppearance_(body));
     if (action === 'forceLogout') return json_(forceLogout_());
-    if (action === 'deleteUser' || action === 'removeUser') return json_(deleteUser_(body));//08.05추가
-    if (action === 'export') return json_(recordExport_(body));  //08.05 export 기능 추가
+    //08.05추가
+    if (action === 'deleteUser' || action === 'removeUser') return json_(deleteUser_(body));
+    //08.05 export 기능 추가
+    if (action === 'export') return json_(recordExport_(body));
+    //815일추가 import
+    if (action === 'getTabs') return json_(handleGetTabs_(body));
+    if (action === 'import') return json_(handleImport_(body));
     return json_(recordOrder_(body)); // default: order from the app
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -255,9 +295,14 @@ function deleteUser_(body) {
 function getData_(scope, vendor) {
   var epoch = PropertiesService.getScriptProperties().getProperty('SESSION_EPOCH') || '';
   var vendorName = String(vendor || '').trim();
+  
+  // APPEARANCE 탭의 D1 셀에서 앱 버전을 직접 읽어옴
+  var appearanceSheet = SS.getSheetByName('APPEARANCE');
+  var appBuildKey = appearanceSheet ? String(appearanceSheet.getRange('G1').getValue() || '').trim() : '';
+
   if (vendorName) {
     // 벤더 단건: 그 벤더 상품만 내려줌 (앱의 '벤더 선택 시 동기화' 모드)
-    return { products: getProducts_(vendorName), sessionEpoch: epoch };
+    return { products: getProducts_(vendorName), sessionEpoch: epoch, appBuildKey: appBuildKey };
   }
   var out = {
     stores: getStores_(),
@@ -265,17 +310,11 @@ function getData_(scope, vendor) {
     emailTemplate: getEmailTemplate_(),
     appearance: getAppearance_(),
     sessionEpoch: epoch,
+    appBuildKey: appBuildKey,
   };
   // scope=light: 상품 제외 (벤더 선택 시 동기화 모드의 시작 동기화)
   if (String(scope || '') !== 'light') out.products = getProducts_();
   return out;
-}
-
-// 전원 강제 로그아웃: epoch 값을 갱신하면 각 기기가 동기화 때 감지해 로그아웃함
-function forceLogout_() {
-  var epoch = String(Date.now());
-  PropertiesService.getScriptProperties().setProperty('SESSION_EPOCH', epoch);
-  return { ok: true, epoch: epoch };
 }
 
 /* ========================= APPEARANCE ============================ */
@@ -401,7 +440,7 @@ var BACKUP_FOLDER_ID = '0AD5atSBCNOrfUk9PVA';  //sam
 var BACKUP_FILE_NAME = 'Order Backup';         //sam or rest     
 var JLFOLDERID = '1zumfLOoj2BQ41djL5JWlsPRKXIQ1IcrP';  //JOON
 var JLFILENAME = 'JOONS ORDER BACKUPS';         //JOON   
-var JL_EMAILS = ['joonlim@jennybs.com'];        // 이메일 추가 가능
+var JL_EMAILS = ['joonlim@jennybs.com','happa.yon12@gmail.com','jini801113@gmail.com'];        // 이메일 추가 가능
 
 var TIMEZONE = 'America/Chicago';
 
@@ -475,7 +514,7 @@ function recordOrderInner_(sh, body) {
               Utilities.formatDate(new Date(), TIMEZONE, 'HH:mm');
   var fileName = (body.vendor || 'ORDER') + ' ' + stamp;
 
-  // 2) B1:G(마지막 행) PDF 생성 — 실패 시 어느 단계인지 표시
+  // 2.5) B1:G(마지막 행) PDF 생성 — 실패 시 어느 단계인지 표시
   var pdf;
   try {
     pdf = exportTabPdf_(sh, fileName);
@@ -483,7 +522,14 @@ function recordOrderInner_(sh, body) {
     throw new Error('[PDF] ' + pdfErr);
   }
 
-  // 3) 벤더 이메일 발송 (제목 = EMAIL 탭 B1, 본문 = EMAIL 탭 B2)
+  // 3) 이메일별 지정 폴더에 PDF 저장 (3단계 이메일 발송 전)
+  try {
+    savePdfToUserFolder_(pdf, body.user);
+  } catch (pdfSaveErr) {
+    throw new Error('[PDF_SAVE] ' + pdfSaveErr);
+  }
+
+  // 4) 벤더 이메일 발송 (제목 = EMAIL 탭 B1, 본문 = EMAIL 탭 B2)
   var emailSh = SS.getSheetByName('EMAIL');
   var subject = emailSh ? String(emailSh.getRange('B1').getValue() || 'Purchase Order') : 'Purchase Order';
   var bodyText = emailSh ? String(emailSh.getRange('B2').getValue() || '') : '';
@@ -505,17 +551,67 @@ function recordOrderInner_(sh, body) {
     emailNote = 'vendor email missing in order data';
   }
 
-  // 4) Order Backup 스프레드시트에 값+서식 사본 탭 추가 — 실패 시 어느 단계인지 표시
+  // 5) Order Backup 스프레드시트에 값+서식 사본 탭 추가 — 실패 시 어느 단계인지 표시
   try {
     backupOrderTab_(sh, fileName);
   } catch (bkErr) {
     throw new Error('[BACKUP] ' + bkErr);
   }
 
-  // 5) 원본 초기화
+  // 6) 원본 초기화
   sh.getRangeList(['B4', 'D4', 'G1', 'G2', 'G3', 'B9:F5000']).clearContent();
 
   return { ok: true, recorded: items.length, file: fileName, emailed: emailed, emailNote: emailNote };
+}
+
+// 이메일별 지정 폴더에 PDF 파일 저장
+function savePdfToUserFolder_(pdf, userEmail) {
+  var email = String(userEmail || '').trim().toLowerCase();
+  
+  var targetFolderId = BACKUP_FOLDER_ID;
+  if (JL_EMAILS.indexOf(email) !== -1) {
+    targetFolderId = JLFOLDERID;
+  }
+  
+  var folder = DriveApp.getFolderById(targetFolderId);
+  return folder.createFile(pdf);
+}
+
+// 탭의 B1:G(마지막 행)을 PDF Blob   실제 저장 함수
+function exportTabPdf_(sh, fileName) {
+  // B열(UPC) 기준 실제 데이터 마지막 행 — G열 ARRAYFORMULA 출력 때문에 getLastRow()는 수천 행이 나옴
+  var colB = sh.getRange(1, 2, sh.getLastRow(), 1).getValues();
+  var lastRow = 9;
+  for (var i = colB.length - 1; i >= 0; i--) {
+    if (String(colB[i][0] || '').length) { lastRow = i + 1; break; }
+  }
+  // 범위 파라미터(r1/r2)를 쓰면 fzr(고정 행 반복)이 무시됨 —
+  // 대신 필요 없는 행/열을 잠시 숨기고 시트 전체를 내보낸다.
+  // 1~8행 반복은 시트에서 [보기 > 고정 > 8행까지] 고정해야 동작.
+  var maxRows = sh.getMaxRows(), maxCols = sh.getMaxColumns();
+  var hideRowCount = maxRows - lastRow;   // lastRow 아래
+  var hideColCount = maxCols - 7;         // H열부터 (B1:G 범위 유지)
+  // 고정(freeze)된 열은 숨길 수 없음 — 고정 열이 있으면 A열 숨기기는 건너뜀
+  var hideColA = sh.getFrozenColumns() < 1;
+  if (hideRowCount > 0) sh.hideRows(lastRow + 1, hideRowCount);
+  if (hideColA) sh.hideColumns(1); // A열
+  if (hideColCount > 0) sh.hideColumns(8, hideColCount);
+  SpreadsheetApp.flush();
+  var url = 'https://docs.google.com/spreadsheets/d/' + SS.getId() + '/export' +
+    '?format=pdf&gid=' + sh.getSheetId() +
+    '&size=letter&portrait=true&fitw=true&fzr=true' +
+    '&gridlines=false&sheetnames=false&printtitle=false&pagenum=false';
+  try {
+    var res = UrlFetchApp.fetch(url, {
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    });
+    return res.getBlob().setName(fileName + '.pdf');
+  } finally {
+    // 내보내기 후 원상복구
+    if (hideRowCount > 0) sh.showRows(lastRow + 1, hideRowCount);
+    if (hideColA) sh.showColumns(1);
+    if (hideColCount > 0) sh.showColumns(8, hideColCount);
+  }
 }
 
 // 탭의 B1:G(마지막 행)을 PDF Blob으로
@@ -621,7 +717,11 @@ function backupOrderTab_(sh, tabName) {
     '=IMAGE("' + imageUrl + '")'
   );
 }
-  //이미지 박제 종료
+  //시트 주소 박기
+  copied.getRange("G4").setFormula('=IFERROR(GET_FULL_URL(),"")');
+  
+  //아래 셀에 메세지 입력 유도
+  copied.getRange("E5").setFormula('IF(G1="7 DOLLAR","메시지 아래 입력","")');
 
 
   // 데이터 아래 남은 깨진 수식(#REF!) 정리
@@ -632,10 +732,10 @@ function backupOrderTab_(sh, tabName) {
 /* ============================ EXPORT ============================= */
 
 var BACKUP_FOLDER_ID = '0AD5atSBCNOrfUk9PVA';  //sam
-var SHEXFILENAME = 'SAMS EXPORTED ORDERS';         //JOON   
+var SHEXFILENAME = 'SAMS EXPORTED ORDERS';         //sam  
 var JLFOLDERID = '1zumfLOoj2BQ41djL5JWlsPRKXIQ1IcrP';  //JOON
 var JLEXFILENAME = 'JOONS EXPORTED ORDERS';         //JOON   
-var JL_EMAILS = ['joonlim@jennybs.com'];        // 이메일 추가 가능
+var JL_EMAILS = ['joonlim@jennybs.com','happa.yon12@gmail.com','jini801113@gmail.com'];        // 이메일 추가 가능
 
 
 // EXPORT 흐름: 탭 기록 → 백업 탭 저장 → 원본 초기화
@@ -812,4 +912,133 @@ function backupExportTab_(sh, tabName) {
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ========================= IMPORT / GET TABS ========================= */
+
+// 1. 사용자 이메일 ↔ 시트 ID 매핑 (확장성 확보)
+var EXPORT_USER_MAPPING = {
+  'joonlim@jennybs.com': '1bZpSO5BFvdKBTc1u9vrK7SlulyagzXFKnmkf3XwwUdM',
+  'samhong@jennybs.com': '1FqeMQ3ygjcr8S_gadDw4_UtLxo21ETBfwgLsNSqHxkU',
+  'sangklee12@gmail.com': '1FqeMQ3ygjcr8S_gadDw4_UtLxo21ETBfwgLsNSqHxkU',
+  'happa.yon12@gmail.com': '1bZpSO5BFvdKBTc1u9vrK7SlulyagzXFKnmkf3XwwUdM',
+  'jini801113@gmail.com': '1bZpSO5BFvdKBTc1u9vrK7SlulyagzXFKnmkf3XwwUdM',
+  'andyhong12@gmail.com': '1FqeMQ3ygjcr8S_gadDw4_UtLxo21ETBfwgLsNSqHxkU'
+  // 직원추가
+};
+
+// 2. 사용자 이메일에 맞춰 다이렉트로 백업 파일을 여는 함수
+function getExportBackupFile_(email) {
+  var userEmail = String(email || '').trim().toLowerCase();
+  var fileId = EXPORT_USER_MAPPING[userEmail];
+  
+  if (fileId) {
+    try {
+      return SpreadsheetApp.openById(fileId);
+    } catch(e) {
+      return null;
+    }
+  }
+  
+  // 만약 매핑 테이블에 없는 사용자라면, 기존 Export 로직처럼 폴더/이름으로 백업 시트를 검색(안전망)
+  var targetFolderId = BACKUP_FOLDER_ID;
+  var targetFileName = SHEXFILENAME;
+  if (JL_EMAILS.indexOf(userEmail) !== -1) {
+    targetFolderId = JLFOLDERID;
+    targetFileName = JLEXFILENAME;
+  }
+  var folder = DriveApp.getFolderById(targetFolderId);
+  var files = folder.getFilesByName(targetFileName);
+  if (files.hasNext()) return SpreadsheetApp.open(files.next());
+  
+  return null;
+}
+
+// 3. getTabs 로직
+function handleGetTabs_(body) {
+  var email = String(body.userEmail || '').trim().toLowerCase();
+  if (!email) return { ok: false, error: 'User email is required' };
+  
+  var backupSS = getExportBackupFile_(email);
+  if (!backupSS) return { ok: true, tabs: [] }; // 백업 파일이 아직 없으면 빈 목록
+
+  var sheets = backupSS.getSheets();
+  var tabs = [];
+  
+  // 최신 데이터가 맨 위에 오도록 역순으로 가져오기
+  for (var i = sheets.length - 1; i >= 0; i--) {
+    var name = sheets[i].getName();
+    // 기본 빈 시트('Sheet'로 시작하는 시트)는 제외하고 발주서 탭만 모음
+    if (name.indexOf('Sheet') !== 0) {
+      tabs.push(name);
+    }
+  }
+  return { ok: true, tabs: tabs };
+}
+
+// 4. import 로직 (추출 후 탭 자동 삭제)
+function handleImport_(body) {
+  var email = String(body.userEmail || '').trim().toLowerCase();
+  var tabName = body.tabName;
+  
+  if (!email) return { ok: false, error: 'User email is required' };
+  if (!tabName) return { ok: false, error: 'Tab name is required' };
+  
+  var backupSS = getExportBackupFile_(email);
+  if (!backupSS) return { ok: false, error: 'Backup file not found' };
+  
+  var sh = backupSS.getSheetByName(tabName);
+  if (!sh) return { ok: false, error: 'Tab not found: ' + tabName };
+  
+  // 4-1. 데이터 파싱 (요청하신 B4, D4, G1 좌표 기준)
+  var storeName = String(sh.getRange("B4").getValue() || '').trim();
+  var d4Value = String(sh.getRange("D4").getValue() || '').trim().toUpperCase();
+  var vendorName = String(sh.getRange("G1").getValue() || '').trim();
+  
+  var shipToJBS = d4Value.indexOf('JBS') !== -1; // JBS 글자가 있으면 true
+  
+  var lastRow = sh.getLastRow();
+  var items = [];
+  
+  // 4-2. 아이템 리스트 추출 (9행부터 B열:UPC, C열:Item Code, F열:QTY)
+  if (lastRow >= 9) {
+    // 2열(B)부터 5칸 넓이(F)까지 데이터를 2차원 배열로 한 번에 로드
+    var values = sh.getRange(9, 2, lastRow - 8, 5).getValues();
+    
+    for (var i = 0; i < values.length; i++) {
+      var row = values[i];
+      var upc = String(row[0] || '').trim().replace(/^'/, ''); // B열 (인덱스 0)
+      var optionStr = String(row[1] || '');                     // C열 (인덱스 1)
+      var qty = Number(row[4]);                                 // F열 (인덱스 4)
+      
+      // 값이 존재하는 유효한 수량만 처리
+      if (upc !== "" && !isNaN(qty) && qty > 0) {
+        var opt = undefined;
+        
+        // C열 텍스트에 '/'가 있으면 오른쪽 부분만 추출해서 trim()
+        var parts = optionStr.split('/');
+        if (parts.length > 1) {
+          opt = parts[1].trim();
+        }
+        
+        items.push({ upc: upc, qty: qty, opt: opt });
+      }
+    }
+  }
+  
+  // 4-3. 데이터 추출 완료 후 해당 탭(시트) 영구 삭제
+  // 시트 파일에는 무조건 1개 이상의 탭이 있어야 에러가 나지 않음. 
+  // 만약 탭이 1개뿐이라면 안전하게 빈 'Sheet1'을 임시로 만들어 주고 삭제.
+  if (backupSS.getSheets().length <= 1) {
+    backupSS.insertSheet('Sheet1');
+  }
+  backupSS.deleteSheet(sh);
+  
+  return {
+    ok: true,
+    store: storeName,
+    vendor: vendorName,
+    shipToJBS: shipToJBS,
+    items: items
+  };
 }
