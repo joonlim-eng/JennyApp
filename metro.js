@@ -1,7 +1,9 @@
 const { spawn } = require('child_process');
 
-// CI=1 환경변수를 주입하여 백그라운드 대기 및 터널 키보드 입력을 자동으로 우회합니다.
-const metro = spawn('npx.cmd', ['expo', 'start', '--tunnel', '--web', '-c'], {
+// PM2에서 전달해준 args를 파싱하여 expo start 뒤에 붙입니다.
+const args = ['expo', 'start', ...process.argv.slice(2)];
+
+const metro = spawn('npx.cmd', args, {
   windowsHide: true,
   shell: true,
   env: { ...process.env, CI: '1' }
