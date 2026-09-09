@@ -207,7 +207,7 @@ const listData = React.useMemo(() => {
             onPress={toggleCamera}
             style={({ pressed }) => [
               styles.cameraToggle,
-              { backgroundColor: cameraOn ? colors.accent : colors.secondary },
+              { backgroundColor: cameraOn ? (colors.cameraBadge || colors.accent) : colors.secondary },
               pressed && { opacity: 0.7 },
             ]}
             testID="camera-toggle"

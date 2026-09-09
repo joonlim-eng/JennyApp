@@ -38,11 +38,24 @@ export type Palette = typeof base & {
   exportBtn?: string;
   actionBtnText?: string; // label color inside the 4 HOME buttons (default white)
   actionBtnIcon?: string; // icon color inside the 4 HOME buttons (default white)
+  cameraBadge?: string;
 };
 
 //accent / tint = SEND, ORDER LOAD  #7B7B7B
 export const themes: Record<string, Palette> = {
   navy: { ...base, primary: '#122A4A', accent: '#0E7C86', tint: '#0E7C86' },
+  'super Famicom': {
+    ...base,
+    primary: '#263238',
+    accent: '#546E7A',
+    tint: '#546E7A',
+    secondary: '#E7EBED',
+    secondaryForeground: '#263238',   
+    sendBtn: '#546E7A',
+    saveBtn: '#FED645', 
+    loadBtn: '#EB1A1D', 
+    cameraBadge: '#3B70C2',
+  },
   rose: {
     ...base,
     primary: '#7A1F3D',

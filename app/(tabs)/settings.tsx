@@ -60,11 +60,13 @@ export default function SettingsScreen() {
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'android' ? topPad : 0}
     >
       <ScrollView 
         contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16 }]}
         keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets={true}
       >
         <Text style={[styles.title, { color: colors.primary }]}>SETTING</Text>
 
