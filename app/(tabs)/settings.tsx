@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   View,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'react-native';
@@ -57,8 +58,14 @@ export default function SettingsScreen() {
   const toggle = (s: Section) => setOpen(open === s ? null : s);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16 }]}>
+    <KeyboardAvoidingView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView 
+        contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16 }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={[styles.title, { color: colors.primary }]}>SETTING</Text>
 
         <SectionHeader label="Users" icon="users" open={open === 'users'} onPress={() => toggle('users')} />
@@ -70,7 +77,7 @@ export default function SettingsScreen() {
         <SectionHeader label="Appearance" icon="sliders" open={open === 'ui'} onPress={() => toggle('ui')} />
         {open === 'ui' && <UiSection />}
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

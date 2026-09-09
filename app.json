@@ -3,7 +3,6 @@
     "name": "JENNY",
     "slug": "order-app",
     "version": "1.0.86",
-    "owner": "joonlim",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "order-app",
