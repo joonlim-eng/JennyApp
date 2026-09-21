@@ -1340,16 +1340,15 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
       const emailSynced = Boolean(
         data.emailTemplate && (data.emailTemplate.title || data.emailTemplate.body),
       );
-      // apply remote appearance (empty map included — tab exists but cleared),
-      // but never while local edits are still waiting to be pushed
+      // apply remote appearance (empty map included — tab exists but cleared)
       let loginPatch: Partial<Settings> = {};
       if (
-        data.appearance && typeof data.appearance === 'object' && !Array.isArray(data.appearance) &&
-        !appearanceDirty.current
+        data.appearance && typeof data.appearance === 'object' && !Array.isArray(data.appearance)
       ) {
         const map: Record<string, string> = {};
         for (const [k, v] of Object.entries(data.appearance)) map[k] = String(v ?? '');
         updates.appearance = map;
+
         // login (대문) settings shared by the admin — apply on every device
         for (const k of LOGIN_SYNC_KEYS) {
           if (k === 'loginIconUri') {
@@ -1366,6 +1365,13 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
             if (k === 'syncMode' && v !== 'all' && v !== 'vendor') continue;
             (loginPatch as any)[k] = v;
           }
+        }
+
+        // 시트에서 가져온 global.theme 또는 login.theme이 존재하는 경우 테마 설정에 적용
+        if (map['global.theme']) {
+          loginPatch.theme = map['global.theme'];
+        } else if (map['login.theme']) {
+          loginPatch.theme = map['login.theme'];
         }
       }
       setState((prev) => ({

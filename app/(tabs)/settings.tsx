@@ -325,16 +325,18 @@ function UiSection() {
       <View style={[styles.fontRow, { marginBottom: 12, flexWrap: 'wrap' }]}>
         {Object.entries(themes).map(([name, t]) => (
           <Pressable
-            key={name}
-            onPress={() => app.updateSettings({ theme: name })}
-            style={[
-              styles.themeOption,
-              {
-                borderColor: app.settings.theme === name ? t.accent : colors.border,
-                borderWidth: app.settings.theme === name ? 2 : 1,
-                backgroundColor: colors.card,
-              },
-            ]}
+           key={name}
+           // 💡 1. 로컬 settings 대신 appearance에 'global.theme' 키로 저장
+           onPress={() => app.updateAppearance('global.theme', name)}
+           style={[
+           styles.themeOption,
+           {
+           // 💡 2. 선택된 테마 하이라이트 조건도 appearance 값을 참조하도록 변경
+           borderColor: (app.appearance['global.theme'] || app.settings.theme) === name ? t.accent : colors.border,
+           borderWidth: (app.appearance['global.theme'] || app.settings.theme) === name ? 2 : 1,
+           backgroundColor: colors.card,
+           },
+          ]}
           >
             <View style={styles.swatchRow}>
               <View style={[styles.swatch, { backgroundColor: t.primary }]} />

@@ -190,13 +190,14 @@ export default function HomeScreen() {
         return;
       }
       if (data && data.emailed === false) {
-        notify(
-          'Recorded, but NO email sent',
-          `Order was recorded and archived, but the vendor email was NOT sent.\n\nReason: ${data.emailNote || 'unknown'}`
-        );
-      } else {
-        notify('Sent', `${vendor?.name} order sent.\nTotal $${app.cartTotal.toFixed(2)}`);
-      }
+      notify(
+      'Sent', // 타이틀은 상황에 맞게 유지 (필요시 'Sent'로 변경 가능)
+      `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`);
+     } else {
+      notify(
+      'Sent', 
+      `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`);
+     }
       app.clearCart();
     } catch (e: any) {
       setSending(false);

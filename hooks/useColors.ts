@@ -8,7 +8,8 @@ import { useOptionalApp } from '@/context/AppContext';
  */
 export function useColors() {
   const app = useOptionalApp();
-  const themeName = app?.settings.theme ?? 'navy';
+  // 시트에서 동기화되는 app.appearance['global.theme']을 우선 참조
+  const themeName = app?.appearance['global.theme'] || app?.settings.theme || 'navy';
   const palette = themes[themeName] ?? colors.light;
   return { ...palette, radius: colors.radius };
 }

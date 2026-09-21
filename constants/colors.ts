@@ -43,8 +43,16 @@ export type Palette = typeof base & {
 
 //accent / tint = SEND, ORDER LOAD  #7B7B7B
 export const themes: Record<string, Palette> = {
+  default: {
+    ...base,
+    primary: '#263238',
+    accent: '#546E7A',
+    tint: '#546E7A',
+    secondary: '#E7EBED',
+    secondaryForeground: '#263238',
+  },
   navy: { ...base, primary: '#122A4A', accent: '#0E7C86', tint: '#0E7C86' },
-  'super Famicom': {
+  'super famicom': {
     ...base,
     primary: '#263238',
     accent: '#546E7A',
@@ -55,6 +63,16 @@ export const themes: Record<string, Palette> = {
     saveBtn: '#FED645', 
     loadBtn: '#EB1A1D', 
     cameraBadge: '#3B70C2',
+  },
+  plum: {
+    ...base,
+    primary: '#5A294F',
+    accent: '#A6537C',
+    tint: '#EBD7E1',
+    exportBtn: '#ab8da9',  
+    loadBtn: '#91709c',
+    secondary: '#a75882', 
+    secondaryForeground: '#FFFFFF',
   },
   rose: {
     ...base,
@@ -81,22 +99,14 @@ export const themes: Record<string, Palette> = {
     secondary: '#E4EEE6',
     secondaryForeground: '#1E3D2F',
   },
-  plum: {
+  blush: {
     ...base,
-    primary: '#3A2352',
-    accent: '#C993FF',
-    tint: '#C993FF',
-    exportBtn: '#AED395',   //excel color
-    secondary: '#ECE4F4', 
-    secondaryForeground: '#3A2352',
-  },
-  slate: {
-    ...base,
-    primary: '#263238',
-    accent: '#546E7A',
-    tint: '#546E7A',
-    secondary: '#E7EBED',
-    secondaryForeground: '#263238',
+    primary: '#515151',
+    accent: '#ffc0c9',
+    tint: '#FDF4FF',
+    exportBtn: '#c4c1c1d2',  
+    secondary: '#F3E8FF',
+    secondaryForeground: '#581C87',
   },
 };
 
