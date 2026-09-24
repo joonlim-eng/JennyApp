@@ -114,6 +114,7 @@ export interface SavedCart {
   createdAt: string;
   items: CartItem[];
   shipToJBS: boolean;
+  department: 'GM' | 'PRODUCT';
 }
 
 export interface Settings {
@@ -140,6 +141,7 @@ export interface Settings {
 }
 
 interface AppState {
+  isHapticDisabled: boolean;
   session: { email: string; role: Role } | null;
   users: AppUser[];
   stores: Store[];
@@ -151,6 +153,7 @@ interface AppState {
   selectedStoreId: string | null;
   selectedVendorId: string | null;
   shipToJBS: boolean;
+  department: 'GM' | 'PRODUCT';
   settings: Settings;
   // screen customization key/value map, synced with the sheet's APPEARANCE tab
   appearance: Record<string, string>;
@@ -252,6 +255,7 @@ const NONCE_KEY = 'multiorder_auth_nonce';
 const ADMIN_EMAIL = 'joonlim@jennybs.com';
 
 interface AppContextValue extends AppState {
+  toggleHaptic: () => void;
   appVersion: string;
   loading: boolean;
   // auth
@@ -271,6 +275,7 @@ interface AppContextValue extends AppState {
   setSelectedStoreId: (id: string | null) => void;
   setSelectedVendorId: (id: string | null) => void;
   setShipToJBS: (v: boolean) => void;
+  setDepartment: (v: 'GM' | 'PRODUCT') => void;
   // cart & scan
   addToScanList: (upc: string) => void;
   removeFromScanList: (upc: string, opt?: string) => void;
@@ -308,6 +313,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>({
+    isHapticDisabled: false,
     session: null,
     users: [],
     stores: SEED_STORES,
@@ -319,6 +325,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     selectedStoreId: null,
     selectedVendorId: null,
     shipToJBS: false,
+    department: 'GM',
     settings: DEFAULT_SETTINGS,
     appearance: {},
     lastSyncAt: null,
@@ -398,6 +405,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const patch = useCallback((p: Partial<AppState>) => {
     setState((prev) => ({ ...prev, ...p }));
   }, []);
+
+  const toggleHaptic = useCallback(() => {
+    patch({ isHapticDisabled: !state.isHapticDisabled });
+  }, [state.isHapticDisabled, patch]);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -765,6 +776,11 @@ const removeUser = useCallback(
     (v: boolean) => patch({ shipToJBS: v }),
     [patch],
   );
+  
+  const setDepartment = useCallback(
+    (v: 'GM' | 'PRODUCT') => patch({ department: v }),
+    [patch],
+  );
 
   // ---------- products / cart ----------
 
@@ -995,6 +1011,7 @@ const specialVendors = ['7 DOLLAR']; // 향후 추가 벤더 확장 자리 (OR �
       createdAt: now.toISOString(),
       items: state.cart,
       shipToJBS: state.shipToJBS,
+      department: state.department,
     };
     // saving archives the cart — the live cart is cleared afterwards
     // (functional update so rapid consecutive actions can't clobber each other)
@@ -1019,6 +1036,7 @@ const specialVendors = ['7 DOLLAR']; // 향후 추가 벤더 확장 자리 (OR �
         selectedStoreId: saved.storeId,
         selectedVendorId: saved.vendorId,
         shipToJBS: saved.shipToJBS,
+        department: saved.department,
         savedCarts: prev.savedCarts.filter((s) => s.id !== id),
       };
     });
@@ -1153,7 +1171,7 @@ const getTabList = async (): Promise<{ ok: boolean; tabs?: string[]; message?: s
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ v: APP_BUILD_KEY, action: 'getTabs', userEmail: stateRef.current.session?.email }),
+    body: JSON.stringify({ v: APP_BUILD_KEY, action: 'getTabs', userEmail: stateRef.current.session?.email, department: stateRef.current.department }),
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1175,10 +1193,11 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
   if (!url) return { ok: false, message: 'Apps Script URL is not configured.' };
 
   try {
+    // [1단계] 서버에 데이터 요청 (이때 서버는 탭을 지우지 않고 데이터만 반환합니다)
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ v: APP_BUILD_KEY, action: 'import', tabName, userEmail: stateRef.current.session?.email }),
+      body: JSON.stringify({ v: APP_BUILD_KEY, action: 'import', tabName, userEmail: stateRef.current.session?.email, department: stateRef.current.department }),
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1204,8 +1223,10 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
       const matchedVendor = stateRef.current.vendors.find(
         (v) => v.name.trim().toLowerCase() === String(data.vendor).trim().toLowerCase()
       );
-      if (matchedVendor) setSelectedVendorId(matchedVendor.id);
-      targetVendorId = matchedVendor.id;
+      if (matchedVendor) {
+        setSelectedVendorId(matchedVendor.id);
+        targetVendorId = matchedVendor.id;
+      }
     }
 
     // 3. Ship to JBS 설정
@@ -1232,7 +1253,7 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
             upc: upcStr,
             qty: Number(item.qty),
             vendorId: targetVendorId || '',
-            opt: optStr, // 장바구니 아이템에 옵션값 박아 넣기
+            opt: optStr, 
           };
         });
 
@@ -1243,6 +1264,18 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
       if (Object.keys(newOptions).length > 0) {
         setSelectedOptions((prev) => ({ ...prev, ...newOptions }));
       }
+    }
+
+    // [2단계] 클라이언트에 데이터가 무사히 적재되었으므로 서버에 탭 삭제 요청 (2-Step 삭제)
+    try {
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ v: APP_BUILD_KEY, action: 'deleteTab', tabName, department: stateRef.current.department }),
+      });
+    } catch (delErr) {
+      console.warn('Failed to delete tab on server after import:', delErr);
+      // 삭제 네트워크 에러가 나더라도 데이터 불러오기는 이미 성공했으므로 에러 처리하지 않음
     }
 
     return { ok: true };
@@ -1539,6 +1572,7 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
     setSelectedStoreId,
     setSelectedVendorId,
     setShipToJBS,
+    setDepartment,
     addToScanList,
     removeFromScanList,
     setQty,
@@ -1564,6 +1598,7 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
     genId,
     itemOptionOf,
     setItemOption,
+    toggleHaptic,
   };
 
   return <AppContext.Provider value={{ ...value, getTabList, importFromSheet }}>{children}</AppContext.Provider>;

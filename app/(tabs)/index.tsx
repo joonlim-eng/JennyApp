@@ -143,6 +143,7 @@ export default function HomeScreen() {
         ? app.stores.find((s) => s.name.startsWith('JBS'))?.address ?? ''
         : store?.address ?? '',
       shipToJBS: app.shipToJBS,
+      department: app.department,
       vendor: vendor?.name ?? '',
       vendorEmail: vendor?.email ?? '',
       user: app.session?.email ?? '',
@@ -393,9 +394,24 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-            {c('home.storeLabel', 'SELECT STORE')}
-          </Text>
+          <View style={[styles.toggleRow, { justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 0, marginTop: 0 }]}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 0 }]}>
+              {c('home.storeLabel', 'SELECT STORE')}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={[styles.toggleLabel, { color: colors.foreground, fontSize: 12.5 * fs }]}>
+                {c('home.shipLabel', 'SHIP TO JBS')}
+              </Text>
+              <Switch
+                value={app.shipToJBS}
+                onValueChange={app.setShipToJBS}
+                trackColor={{ true: colors.accent, false: colors.border }}
+                thumbColor="#fff"
+                testID="ship-to-jbs"
+              />
+            </View>
+          </View>
+          
           <Dropdown
             placeholder="Select store"
             options={app.stores.map((s) => ({
@@ -405,18 +421,6 @@ export default function HomeScreen() {
             onChange={(id) => guardedChange('store', id)}
             testID="select-store"
           />
-          <View style={styles.toggleRow}>
-            <Text style={[styles.toggleLabel, { color: colors.foreground, fontSize: 12.5 * fs }]}>
-              {c('home.shipLabel', 'SHIP TO JBS')}
-            </Text>
-            <Switch
-              value={app.shipToJBS}
-              onValueChange={app.setShipToJBS}
-              trackColor={{ true: colors.accent, false: colors.border }}
-              thumbColor="#fff"
-              testID="ship-to-jbs"
-            />
-          </View>
         </View>
 
         <View style={styles.section}>
@@ -432,6 +436,26 @@ export default function HomeScreen() {
             onChange={(id) => guardedChange('vendor', id)}
             testID="select-vendor"
           />
+
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
+            <Pressable
+              onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
+              style={({ pressed }) => [
+                {
+                  paddingHorizontal: 14,
+                  paddingVertical: 6,
+                  borderRadius: 12,
+                  backgroundColor: colors.departmentToggle ?? colors.primary,
+                },
+                pressed && { opacity: 0.8 },
+              ]}
+              testID="department-toggle"
+            >
+              <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold', fontSize: 12.5 * fs }}>
+                {app.department}
+              </Text>
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.section}>

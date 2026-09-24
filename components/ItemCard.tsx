@@ -49,7 +49,8 @@ interface Props {
   cartOption?: string; // 카트 화면용 고정 옵션
 }
 
-function haptic() { 
+function haptic(isHapticDisabled?: boolean) { 
+  if (isHapticDisabled) return;
   if (Platform.OS !== 'web') {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
   }
@@ -57,9 +58,9 @@ function haptic() {
 
 // 1. 방어막이 쳐진 알맹이 UI (내 수량(qty)이 바뀌지 않으면 절대 다시 그리지 않음)
   const MemoizedCard = memo(({
-  product, onRelated, onDelete, showQty = true, cartOption, qty, step, colors, fs, onSetQty, selectedOpt, onSelectOpt
+  product, onRelated, onDelete, showQty = true, cartOption, qty, step, colors, fs, onSetQty, selectedOpt, onSelectOpt, isHapticDisabled
   }: Props & { qty: number; step: number; colors: any; fs: number; onSetQty: (upc: string, q: number) 
-  => void; selectedOpt?: string; onSelectOpt: (upc: string, opt: string) => void }) => {
+  => void; selectedOpt?: string; onSelectOpt: (upc: string, opt: string) => void; isHapticDisabled?: boolean }) => {
   const [imageFailed, setImageFailed] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [qtyModalOpen, setQtyModalOpen] = useState(false);
@@ -67,7 +68,7 @@ function haptic() {
   const qtyInputRef = React.useRef<TextInput>(null);
 
   const openQtyModal = () => {
-    haptic();
+    haptic(isHapticDisabled);
     setQtyInput(qty > 0 ? String(qty) : '');
     setQtyModalOpen(true);
   };
@@ -88,7 +89,7 @@ function haptic() {
         <Pressable
           onPress={() => {
             if (imageUri && !imageFailed) {
-              haptic();
+              haptic(isHapticDisabled);
               setViewerOpen(true);
             }
           }}
@@ -118,7 +119,7 @@ function haptic() {
             <Pressable
               onPress={() => {
                 if (isCart) return;
-                haptic();
+                haptic(isHapticDisabled);
                 const currentIndex = options.indexOf(selectedOpt || options[0]);
                 const nextIndex = (currentIndex + 1) % options.length;
                 onSelectOpt(product.upc, options[nextIndex]);
@@ -218,7 +219,7 @@ function haptic() {
           </Text>
           <View style={styles.actions}>
             <Pressable
-              onPress={() => { haptic(); onRelated(product); }}
+              onPress={() => { haptic(isHapticDisabled); onRelated(product); }}
               style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
               testID={`related-${product.upc}`}
             >
@@ -226,7 +227,7 @@ function haptic() {
             </Pressable>
             {onDelete && qty > 0 && (
               <Pressable
-                onPress={() => { haptic(); onDelete(product.upc, selectedOpt); }}
+                onPress={() => { haptic(isHapticDisabled); onDelete(product.upc, selectedOpt); }}
                 style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
                 testID={`delete-${product.upc}`}
               >
@@ -236,7 +237,7 @@ function haptic() {
             {showQty && (
               <View style={[styles.qtyBox, { borderColor: colors.border }]}>
                 <Pressable
-                  onPress={() => { haptic(); onSetQty(product.upc, Math.max(0, qty - step)); }}
+                  onPress={() => { haptic(isHapticDisabled); onSetQty(product.upc, Math.max(0, qty - step)); }}
                   hitSlop={{ top: 14, bottom: 14, left: 14, right: 2 }}
                   style={({ pressed }) => [styles.qtyBtn, pressed && styles.pressed]}
                   testID={`minus-${product.upc}`}
@@ -254,7 +255,7 @@ function haptic() {
                   </Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => { haptic(); onSetQty(product.upc, qty + step); }}
+                  onPress={() => { haptic(isHapticDisabled); onSetQty(product.upc, qty + step); }}
                   hitSlop={{ top: 14, bottom: 14, left: 2, right: 17 }}    //+ 버튼 터치 히트박스 설정
                   style={({ pressed }) => [styles.qtyBtn, pressed && styles.pressed]}
                   testID={`plus-${product.upc}`}
@@ -269,7 +270,7 @@ function haptic() {
     </View>
   );
 }, (prev, next) => {
-  return prev.qty === next.qty && prev.product.upc === next.product.upc && prev.selectedOpt === next.selectedOpt;
+  return prev.qty === next.qty && prev.product.upc === next.product.upc && prev.selectedOpt === next.selectedOpt && prev.isHapticDisabled === next.isHapticDisabled;
 });
 
 
@@ -277,7 +278,7 @@ function haptic() {
 export default function ItemCard(props: Props) {
   const colors = useColors();
   const fs = useFontScale();
-  const { qtyOf, setQty, vendors, itemOptionOf, setItemOption } = useApp();
+  const { qtyOf, setQty, vendors, itemOptionOf, setItemOption, isHapticDisabled } = useApp();
   
   const step = vendors.find((v) => v.id === props.product.vendorId)?.qtyStep || 1;
   
@@ -300,6 +301,7 @@ export default function ItemCard(props: Props) {
       onSetQty={(upc, q) => setQty(upc, q, selectedOpt)}
       selectedOpt={selectedOpt}
       onSelectOpt={setItemOption}
+      isHapticDisabled={isHapticDisabled}
     />
   );
 }

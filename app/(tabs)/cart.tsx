@@ -62,7 +62,7 @@ export default function CartScreen() {
                 </View>
               )}
             </View>
-            <Text style={[styles.totalValue, { color: c('cart.totalColor', colors.primary), fontSize: 26 * fs }]}>
+            <Text style={[styles.totalValue, { color: c('cart.totalColor', colors.primary), fontSize: 26 * fs }, app.isHapticDisabled && { fontStyle: 'italic' }]}>
               ${app.cartTotal.toFixed(2)}
             </Text>
           </View>

@@ -39,6 +39,8 @@ export type Palette = typeof base & {
   actionBtnText?: string; // label color inside the 4 HOME buttons (default white)
   actionBtnIcon?: string; // icon color inside the 4 HOME buttons (default white)
   cameraBadge?: string;
+  departmentToggle?: string;
+
 };
 
 //accent / tint = SEND, ORDER LOAD  #7B7B7B
@@ -62,7 +64,8 @@ export const themes: Record<string, Palette> = {
     sendBtn: '#546E7A',
     saveBtn: '#FED645', 
     loadBtn: '#EB1A1D', 
-    cameraBadge: '#3B70C2',
+    cameraBadge:'#3B70C2', 
+    departmentToggle: '#3B70C2', 
   },
   plum: {
     ...base,

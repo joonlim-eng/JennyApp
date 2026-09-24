@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Platform,
   Pressable,
@@ -39,6 +40,33 @@ export default function ScanScreen() {
   const lastScanRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
   const flatListRef = useRef<FlatList>(null);
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+
+  // 벤더 토글 및 자동 저장 로직
+  const handleVendorToggle = useCallback(() => {
+    if (app.vendors.length === 0) return;
+
+    const currentIndex = app.vendors.findIndex((v) => v.id === app.selectedVendorId);
+    // 현재 인덱스가 없으면(-1) 0으로 처리하여 첫 번째 벤더부터 시작, 아니면 다음 벤더로 순환
+    const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % app.vendors.length;
+    const nextVendorId = app.vendors[nextIndex].id;
+
+    if (app.selectedVendorId === nextVendorId) return;
+
+    // 카트에 물건이 있을 경우 홈(index) 화면과 동일하게 자동 저장
+    if (app.cart.length > 0) {
+      const saved = app.saveCart();
+      const title = 'Auto-saved';
+      const msg = saved ? `Cart saved as:\n${saved.name}` : 'Cart cleared.';
+
+      if (Platform.OS === 'web') {
+        window.alert(`${title}\n\n${msg}`);
+      } else {
+        Alert.alert(title, msg);
+      }
+    }
+
+    app.setSelectedVendorId(nextVendorId);
+  }, [app]);
 
   // 스토어/벤더 변경 또는 카트 저장(SAVE) 시 검색 결과 초기화
   useEffect(() => {
@@ -188,11 +216,20 @@ const listData = React.useMemo(() => {
       {/* frozen top panel */}
       <View style={[styles.topPanel, { paddingTop: topPad + 8, backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <View style={styles.totalRow}>
-          <Text style={[styles.totalLabel, { color: colors.mutedForeground }]}>TOTAL</Text>
-          <Text style={[styles.totalValue, { color: colors.primary, fontSize: 22 * fs }]}>
+          <Pressable onPress={app.toggleHaptic}>
+            <Text style={[styles.totalLabel, { color: colors.mutedForeground }]}>TOTAL</Text>
+          </Pressable>
+          <Text style={[styles.totalValue, { color: colors.primary, fontSize: 22 * fs }, app.isHapticDisabled && { fontStyle: 'italic' }]}>
             ${app.cartTotal.toFixed(2)}
           </Text>
-          <View style={[styles.vendorBadge, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+          <Pressable
+            onPress={handleVendorToggle}
+            style={({ pressed }) => [
+              styles.vendorBadge,
+              { backgroundColor: colors.muted, borderColor: colors.border },
+              pressed && { opacity: 0.7 },
+            ]}
+          >
             <Text
               style={[
                 styles.vendorBadgeText,
@@ -202,7 +239,7 @@ const listData = React.useMemo(() => {
             >
               {app.vendors.find((v) => v.id === app.selectedVendorId)?.name ?? 'NO VENDOR'}
             </Text>
-          </View>
+          </Pressable>
           <Pressable
             onPress={toggleCamera}
             style={({ pressed }) => [
