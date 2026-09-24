@@ -115,6 +115,7 @@ export interface SavedCart {
   items: CartItem[];
   shipToJBS: boolean;
   department: 'GM' | 'PRODUCT';
+  jorderid?: string;
 }
 
 export interface Settings {
@@ -307,6 +308,7 @@ interface AppContextValue extends AppState {
   importFromSheet?: (tabName: string) => Promise<{ ok: boolean; message?: string }>;
   itemOptionOf?: (upc: string) => string | undefined;
   setItemOption?: (upc: string, opt: string) => void;
+  generateJOrderId: () => string;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -1012,6 +1014,7 @@ const specialVendors = ['7 DOLLAR']; // 향후 추가 벤더 확장 자리 (OR �
       items: state.cart,
       shipToJBS: state.shipToJBS,
       department: state.department,
+      jorderid: generateJOrderId(),
     };
     // saving archives the cart — the live cart is cleared afterwards
     // (functional update so rapid consecutive actions can't clobber each other)
@@ -1048,6 +1051,31 @@ const specialVendors = ['7 DOLLAR']; // 향후 추가 벤더 확장 자리 (OR �
       savedCarts: prev.savedCarts.filter((s) => s.id !== id),
     }));
   }, []);
+
+  const generateJOrderId = useCallback(() => {
+    // 1. DEPARTMENT (1자리)
+    const d = state.department ? state.department.charAt(0).toUpperCase() : 'G';
+    
+    // 2. VENDOR (2자리) - 공백/특수문자 제거 후 앞 2글자
+    const vendor = state.vendors.find((v) => v.id === state.selectedVendorId);
+    const v = (vendor?.name || 'XX').replace(/[^A-Z0-9]/ig, '').padEnd(2, 'X').substring(0, 2).toUpperCase();
+    
+    // 3. STORE (2자리) - 공백/특수문자 제거 후 앞 2글자
+    const store = state.stores.find((s) => s.id === state.selectedStoreId);
+    const s = (store?.name || 'XX').replace(/[^A-Z0-9]/ig, '').padEnd(2, 'X').substring(0, 2).toUpperCase();
+    
+    // 4. SHIPTOJBS 여부 (2자리)
+    const ship = state.shipToJBS ? 'TR' : 'FA';
+    
+    // 5. 날짜 MMDD 및 시간 HHMM (총 8자리)
+    const now = new Date();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    
+    return `${d}${v}${s}${ship}${mm}${dd}${hh}${min}`;
+  }, [state.department, state.vendors, state.selectedVendorId, state.stores, state.selectedStoreId, state.shipToJBS]);
 
   // ---------- admin CRUD ----------
   const upsertStore = useCallback(
@@ -1599,6 +1627,7 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
     itemOptionOf,
     setItemOption,
     toggleHaptic,
+    generateJOrderId,
   };
 
   return <AppContext.Provider value={{ ...value, getTabList, importFromSheet }}>{children}</AppContext.Provider>;

@@ -149,6 +149,7 @@ export default function HomeScreen() {
       user: app.session?.email ?? '',
       total: app.cartTotal,
       createdAt: new Date().toISOString(),
+      jorderid: app.generateJOrderId(),
       items,
     };
   };
