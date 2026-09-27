@@ -10,6 +10,7 @@ import {
   Switch,
   Text,
   View,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@/components/AppIcon';
@@ -42,6 +43,50 @@ export default function HomeScreen() {
   const [exporting, setExporting] = useState(false);
   const [sending, setSending] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [checkingVersion, setCheckingVersion] = useState(false);
+
+  const handleCheckVersion = async () => {
+    if (checkingVersion) return;
+    
+    const url = app.settings.appsScriptUrl?.trim();
+    if (!url) {
+      notify('Notice', 'Apps Script URL is not set.');
+      return;
+    }
+
+    setCheckingVersion(true);
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'checkUpdate', v: app.appVersion }),
+      });
+      
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      
+      if (data && data.latestVersion) {
+        if (data.latestVersion > app.appVersion) {
+          const ok = await confirmAsync(
+            'Update Available',
+            `Latest Version (${data.latestVersion})is available.\nDownload it now?`
+          );
+          if (ok && data.downloadUrl) {
+            Linking.openURL(data.downloadUrl);
+          }
+        } else {
+          notify('최신 버전', 'App is up to date');
+        }
+      } else {
+        //  서버가 보낸 실제 응답을 그대로 화면에 띄우기
+        notify('서버 응답 확인', `응답 데이터:\n${JSON.stringify(data)}`);
+      }
+    } catch (e: any) {
+      notify('통신 에러', `에러 내용:\n${e?.message ?? ''}`);
+    } finally {
+      setCheckingVersion(false);
+    }
+  };
 
   // Import 관련 추가 UI 상태
   const [importModalVisible, setImportModalVisible] = useState(false);
@@ -352,9 +397,15 @@ export default function HomeScreen() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={[styles.brand, { color: c('home.brandColor', colors.primary), fontSize: 20 * fs }]}>
-              {app.settings.appTitle}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text 
+                style={[styles.brand, { color: c('home.brandColor', colors.primary), fontSize: 20 * fs }]}
+                onPress={handleCheckVersion}
+              >
+                {app.settings.appTitle}
+              </Text>
+              {checkingVersion && <ActivityIndicator size="small" color={colors.primary} />}
+            </View>
             <Text style={[styles.userEmail, { color: colors.mutedForeground, fontSize: 12 * fs }]}>
               {app.session?.email}
             </Text>
@@ -480,10 +531,11 @@ export default function HomeScreen() {
 
         <View style={styles.buttonGrid}>
           <ActionButton
-            icon={<Feather name="send" size={22} color={colors.actionBtnIcon ?? '#fff'} />}
+            icon={<Feather name="send" size={22} color={colors.sendBtnText ?? colors.actionBtnIcon ?? '#fff'} />}
             label={c('home.sendLabel', 'SEND')}
             color={c('home.sendColor', colors.sendBtn ?? colors.accent)}
-            textColor={colors.actionBtnText}
+            borderColor={colors.sendBtnBorder}
+            textColor={colors.sendBtnText ?? colors.actionBtnText}
             onPress={handleSend}
             testID="btn-send"
           />

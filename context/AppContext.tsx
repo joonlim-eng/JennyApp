@@ -3,7 +3,7 @@ import { Alert } from 'react-native';
 //dsgsdgsdg
 
 
-const APP_BUILD_KEY = 'v1.2.906'
+const APP_BUILD_KEY = 'v1.3.000'
 
 import React, {
   createContext,

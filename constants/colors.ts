@@ -32,6 +32,8 @@ export type Palette = typeof base & {
   totalLabel?: string; // "TOTAL" text color inside the card (default: translucent white)
   // HOME action button defaults when they differ from primary/accent/success
   sendBtn?: string;
+  sendBtnText?: string;
+  sendBtnBorder?: string;
   saveBtn?: string;
   saveBtnBorder?: string;
   loadBtn?: string;
@@ -54,6 +56,7 @@ export const themes: Record<string, Palette> = {
     secondaryForeground: '#263238',
   },
   navy: { ...base, primary: '#122A4A', accent: '#0E7C86', tint: '#0E7C86' },
+
   'super famicom': {
     ...base,
     primary: '#263238',
@@ -101,6 +104,41 @@ export const themes: Record<string, Palette> = {
     tint: '#2E7D32',
     secondary: '#E4EEE6',
     secondaryForeground: '#1E3D2F',
+  },
+  pumpkin: {
+    ...base,
+    background: '#FAF4EB',
+    primary: '#D35D14',
+    accent: '#D35D14',
+    tint: '#D35D14',
+    border: '#CBAE9A',
+    input: '#CBAE9A',
+    totalCard: '#D35D14',
+    sendBtn: '#3E7C41',
+    exportBtn: '#423225',
+    saveBtn: '#8C7C6F',
+    loadBtn: '#DE7A2F',
+    secondary: '#EBE2D5',
+    secondaryForeground: '#423225',
+  },
+  christmas: {
+    ...base,
+    background: '#E8F1F5',
+    primary: '#C41E3A',
+    accent: '#2563EB',
+    tint: '#C41E3A',
+    border: '#9BB8D0',
+    input: '#C5B9A9',
+    totalCard: '#C41E3A',
+    sendBtn: '#FFFFFF',
+    sendBtnText: '#2563EB',
+    sendBtnBorder: '#2563EB',
+    exportBtn: '#60A5FA',
+    saveBtn: '#FFD54F',
+    saveBtnBorder: '#C0C0C0',
+    loadBtn: '#1B9C56',
+    secondary: '#E5DFD3',
+    secondaryForeground: '#1B4D3E',
   },
   blush: {
     ...base,

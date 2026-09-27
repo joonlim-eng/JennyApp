@@ -1,4 +1,4 @@
-// 최종 수정: 2026-09-06 11:02 AM(CT) 배포
+// 최종 수정: 2026-09-27 12:38 PM(CT) 배포   //update link
 var SS = SpreadsheetApp.getActiveSpreadsheet();
 function doGet(e) {
   
@@ -60,15 +60,15 @@ function doGet(e) {
 function doPost(e) {
   try {
     var body = JSON.parse(e.postData.contents);
-    
-    //입구컷 시작
+
+  //입구컷 시작
     var shApp = SS.getSheetByName('APPEARANCE');
     var serverVer = shApp ? String(shApp.getRange('G1').getValue() || '').trim() : '';
     // POST 요청은 body.v 또는 URL 파라미터(e.parameter.v)에서 버전을 확인합니다.
     var clientVer = String(body.v || (e && e.parameter && e.parameter.v) || '').trim();
 
-    // 앱 버전이 서버 D1 값과 안 맞으면 주문/데이터 처리 단 한 줄도 실행 안 하고 즉시 차단
-    if (serverVer && clientVer !== serverVer) {
+    // D1 불일치 바로 차단 (checkUpdate 요청은 검사 제외)
+    if (body.action !== 'checkUpdate' && serverVer && clientVer !== serverVer) {
       return json_({ 
         ok: false, 
         error: 'UPDATE REQUIRED', 
@@ -76,6 +76,36 @@ function doPost(e) {
       });
     }
     //입구컷 완료
+
+    if (body.action === 'checkUpdate') {
+      var folderId = '0AFUXuwAbnKJtUk9PVA';
+      var folder = DriveApp.getFolderById(folderId);
+      var files = folder.getFiles();
+      
+      var latestVersion = "";
+      var downloadUrl = "";
+      
+      while (files.hasNext()) {
+        var file = files.next();
+        var name = file.getName();
+        
+        var match = name.match(/v\d+\.\d+\.\d+/);
+        if (match) {
+          var version = match[0];
+          
+          if (version > latestVersion) {
+            latestVersion = version;
+            downloadUrl = file.getUrl(); 
+          }
+        }
+      }
+      
+      return ContentService.createTextOutput(JSON.stringify({
+        ok: true,
+        latestVersion: latestVersion,
+        downloadUrl: downloadUrl
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
 
     var action = body.action || 'order';
     if (action === 'requestAccess') return json_(requestAccess_(body));
@@ -87,9 +117,10 @@ function doPost(e) {
     if (action === 'deleteUser' || action === 'removeUser') return json_(deleteUser_(body));
     //08.05 export 기능 추가
     if (action === 'export') return json_(recordExport_(body));
-    //815일추가 import
+    //815일추가 import   923 수정
     if (action === 'getTabs') return json_(handleGetTabs_(body));
     if (action === 'import') return json_(handleImport_(body));
+    if (action === 'deleteTab') return json_(handleDeleteTab_(body)); // 2-Step 삭제 로직 연결
     return json_(recordOrder_(body)); // default: order from the app
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -436,16 +467,26 @@ function getEmailTemplate_() {
 
 /* ============================ ORDERS ============================= */
 
-var BACKUP_FOLDER_ID = '0AD5atSBCNOrfUk9PVA';  //sam
-var BACKUP_FILE_NAME = 'Order Backup';         //sam or rest     
-var JLFOLDERID = '1zumfLOoj2BQ41djL5JWlsPRKXIQ1IcrP';  //JOON
-var JLFILENAME = 'JOONS ORDER BACKUPS';         //JOON   
-var JL_EMAILS = ['joonlim@jennybs.com','happa.yon12@gmail.com','jini801113@gmail.com'];        // 이메일 추가 가능
-
 var TIMEZONE = 'America/Chicago';
+var BYPASS_EMAIL = true;
+
+var DEPT_CONFIG = {
+  'GM': {
+    folderId: '1zumfLOoj2BQ41djL5JWlsPRKXIQ1IcrP',
+    orderFileId: '1rz9N-B3thjepiWJaXyAZC7ekxCNSPr6qDEUxINbSEgE',
+    exportFileId: '1bZpSO5BFvdKBTc1u9vrK7SlulyagzXFKnmkf3XwwUdM'
+  },
+  'PRODUCT': {
+    folderId: '0AD5atSBCNOrfUk9PVA',
+    orderFileId: '1rxje0biYpJESDuo_X7R9lDLKfeWx42y_P6dj_ubIC7w',
+    exportFileId: '1FqeMQ3ygjcr8S_gadDw4_UtLxo21ETBfwgLsNSqHxkU'
+  }
+};
 
 // SEND 흐름: 탭 기록 → PDF 생성 → 벤더 이메일 발송 → 백업 탭 저장 → 원본 초기화
 function recordOrder_(body) {
+  var startTime = Date.now(); // 1. 스크립트 시작 시간 기록
+
   var email = String(body.user || '').trim();
   if (!email) return { ok: false, error: 'no user email' };
 
@@ -455,13 +496,13 @@ function recordOrder_(body) {
     return { ok: false, busy: true, error: 'Server is processing another order. Please try again shortly.' };
   }
   try {
-    return recordOrderLocked_(body, email);
+    return recordOrderLocked_(body, email, startTime); // startTime 전달 추가
   } finally {
     lock.releaseLock();
   }
 }
 
-function recordOrderLocked_(body, email) {
+function recordOrderLocked_(body, email, startTime) { // startTime 파라미터 추가
   var sh = SS.getSheetByName(email);
   if (!sh) {
     var tpl = SS.getSheetByName('TEMPLATE');
@@ -476,22 +517,32 @@ function recordOrderLocked_(body, email) {
   cache.put('SENDING', '1', 180); // 최대 3분
   if (wasHidden) sh.showSheet();
   try {
-    return recordOrderInner_(sh, body);
+    return recordOrderInner_(sh, body, startTime); // startTime 전달 추가
   } finally {
     if (wasHidden) sh.hideSheet();
     cache.remove('SENDING');
   }
 }
 
-function recordOrderInner_(sh, body) {
+function recordOrderInner_(sh, body, startTime) { // startTime 파라미터
 
-  sh.getRangeList(['B4', 'D4', 'G1', 'G2', 'G3', 'B9:F5000']).clearContent();
+  // B1(부서 이미지)도 초기화 대상에 포함하여 작업 탭을 깔끔하게 정리
+  sh.getRangeList(['B1', 'B4', 'D4', 'G1', 'G2', 'G3', 'G5', 'B10:F5000']).clearContent();
 
+  // 1) 부서별 로고 이미지를 B1 셀에 수식으로 삽입 (PDF 생성 및 템플릿 작업용)
+  var deptKey = String(body.department || 'PRODUCT').trim().toUpperCase();
+  var imageId = (deptKey === 'GM') 
+    ? '13kuGkgRIpVja2DKvx8gF4UOsL2EEIEWT' 
+    : '1YLTWSPjZfqURaPdLmexaOsSDmos5P9Ad';
+  sh.getRange('B1').setFormula('=IMAGE("https://drive.google.com/uc?id=' + imageId + '")');
+
+  // 2) 나머지 주문 정보 입력
   sh.getRange('B4').setValue(body.store || '');
   sh.getRange('D4').setValue(body.shipToJBS ? 'JBS' : (body.store || ''));
   sh.getRange('G1').setValue(body.vendor || '');
   sh.getRange('G2').setValue(new Date());
   sh.getRange('G3').setValue(String(body.user || '').trim()); // 발주자 이메일 기록
+  sh.getRange('G5').setValue(body.jorderid ? 'ORDER ID : ' + body.jorderid : ''); // ORDER ID 기록
 
   var items = body.items || [];
   if (items.length) {
@@ -506,7 +557,7 @@ function recordOrderInner_(sh, body) {
     });
     sh.getRange(9, 2, rows.length, 5).setValues(rows); // B9:F부터
   }
-  SpreadsheetApp.flush(); // 수식 계산 반영
+  SpreadsheetApp.flush(); // 수식 계산 및 이미지 렌더링 반영 대기
 
   // 파일명: 벤더명 mm.dd.yyyy 매장 시:분
   var stamp = Utilities.formatDate(new Date(), TIMEZONE, 'MM.dd.yyyy') + ' ' +
@@ -514,19 +565,33 @@ function recordOrderInner_(sh, body) {
               Utilities.formatDate(new Date(), TIMEZONE, 'HH:mm');
   var fileName = (body.vendor || 'ORDER') + ' ' + stamp;
 
-  // 2.5) B1:G(마지막 행) PDF 생성 — 실패 시 어느 단계인지 표시
+  // 2.5) PDF 생성 — 실패 시 어느 단계인지 표시 (이제 B1 이미지가 포함되어 캡처됨)
   var pdf;
   try {
-    pdf = exportTabPdf_(sh, fileName);
-  } catch (pdfErr) {
-    throw new Error('[PDF] ' + pdfErr);
+    pdf = exportTabPdf_(sh, fileName); 
+  } catch (exportErr) {
+    throw new Error('[EXPORT] ' + exportErr);
   }
 
-  // 3) 이메일별 지정 폴더에 PDF 저장 (3단계 이메일 발송 전)
+  // 3) 부서(department)별 지정 폴더 하위 당일 날짜 폴더에 PDF 저장 (3단계 이메일 발송 전)// 3) 부서(department)별 지정 폴더 하위 당일 날짜 폴더에 PDF 저장 (3단계 이메일 발송 전)
+  var savedPdfUrl = '';
   try {
-    savePdfToUserFolder_(pdf, body.user);
-  } catch (pdfSaveErr) {
-    throw new Error('[PDF_SAVE] ' + pdfSaveErr);
+    var savedFile = saveFilesToUserFolder_(pdf, body.department);
+    savedPdfUrl = savedFile.getUrl();
+  } catch (saveErr) {
+    throw new Error('[FILE_SAVE] ' + saveErr);
+  }
+
+  // 3.5) 외부 시트에 주문 내역 로깅 (월별 탭, A3 이후 빈 행)
+  try {
+    logOrderToExternalSheet_(body, savedPdfUrl);
+  } catch (logErr) {
+    throw new Error('[EXTERNAL_LOG] ' + logErr);
+  }
+  try {
+    saveFilesToUserFolder_(pdf, body.department);
+  } catch (saveErr) {
+    throw new Error('[FILE_SAVE] ' + saveErr);
   }
 
   // 4) 벤더 이메일 발송 (제목 = EMAIL 탭 B1, 본문 = EMAIL 탭 B2)
@@ -535,7 +600,10 @@ function recordOrderInner_(sh, body) {
   var bodyText = emailSh ? String(emailSh.getRange('B2').getValue() || '') : '';
   // 이메일이 실패해도 아카이브는 진행하고, 결과를 앱에 알려줌
   var emailed = false, emailNote = '';
-  if (body.vendorEmail) {
+
+  if (typeof BYPASS_EMAIL !== 'undefined' && BYPASS_EMAIL) {
+    emailNote = 'Order has been sent to Google Drive';
+  } else if (body.vendorEmail) {
     try {
       var opts = { attachments: [pdf] };
       // MASTER / ADMINISTRATOR 등급은 본인 메일로도 사본 수신
@@ -553,28 +621,49 @@ function recordOrderInner_(sh, body) {
 
   // 5) Order Backup 스프레드시트에 값+서식 사본 탭 추가 — 실패 시 어느 단계인지 표시
   try {
-    backupOrderTab_(sh, fileName);
+    backupOrderTab_(sh, fileName, body.department);
   } catch (bkErr) {
     throw new Error('[BACKUP] ' + bkErr);
   }
 
-  // 6) 원본 초기화
-  sh.getRangeList(['B4', 'D4', 'G1', 'G2', 'G3', 'B9:F5000']).clearContent();
+  // 6) 원본 초기화 (B1 포함하여 잔상 제거)
+  sh.getRangeList(['B1', 'B4', 'D4', 'G1', 'G2', 'G3', 'G5', 'B9:F5000']).clearContent();
+
+  // 7) 경과 시간 계산 및 emailNote 업데이트 추가
+  var endTime = Date.now();
+  var elapsedSec = ((endTime - startTime) / 1000).toFixed(2);
+  
+  if (emailNote !== '') {
+    emailNote = emailNote + ' ' + elapsedSec;
+  } else {
+    emailNote = String(elapsedSec);
+  }
 
   return { ok: true, recorded: items.length, file: fileName, emailed: emailed, emailNote: emailNote };
 }
 
-// 이메일별 지정 폴더에 PDF 파일 저장
-function savePdfToUserFolder_(pdf, userEmail) {
-  var email = String(userEmail || '').trim().toLowerCase();
-  
-  var targetFolderId = BACKUP_FOLDER_ID;
-  if (JL_EMAILS.indexOf(email) !== -1) {
-    targetFolderId = JLFOLDERID;
-  }
+// 부서(department)별 지정 폴더 하위에 당일 날짜(MM.dd.yyyy) 폴더를 생성/탐색하여 PDF 파일 저장
+function saveFilesToUserFolder_(pdf, department) {
+  var deptKey = String(department || 'PRODUCT').trim().toUpperCase();
+  var config = DEPT_CONFIG[deptKey] || DEPT_CONFIG['PRODUCT'];
+  var targetFolderId = config.folderId;
   
   var folder = DriveApp.getFolderById(targetFolderId);
-  return folder.createFile(pdf);
+  
+  // 날짜 하위 폴더 이름 생성 (MM.dd.yyyy)
+  var dateFolderName = Utilities.formatDate(new Date(), TIMEZONE, 'MM.dd.yyyy');
+  var subFolders = folder.getFoldersByName(dateFolderName);
+  var targetSubFolder;
+  
+  // 하위 폴더가 존재하면 가져오고 없으면 새로 생성
+  if (subFolders.hasNext()) {
+    targetSubFolder = subFolders.next();
+  } else {
+    targetSubFolder = folder.createFolder(dateFolderName);
+  }
+  
+  // 생성/지정된 날짜 폴더 안에 pdf 파일 저장하고 파일 객체 반환
+  return targetSubFolder.createFile(pdf);
 }
 
 // 탭의 B1:G(마지막 행)을 PDF Blob   실제 저장 함수
@@ -614,83 +703,18 @@ function exportTabPdf_(sh, fileName) {
   }
 }
 
-// 탭의 B1:G(마지막 행)을 PDF Blob으로
-function exportTabPdf_(sh, fileName) {
-  // B열(UPC) 기준 실제 데이터 마지막 행 — G열 ARRAYFORMULA 출력 때문에 getLastRow()는 수천 행이 나옴
-  var colB = sh.getRange(1, 2, sh.getLastRow(), 1).getValues();
-  var lastRow = 9;
-  for (var i = colB.length - 1; i >= 0; i--) {
-    if (String(colB[i][0] || '').length) { lastRow = i + 1; break; }
-  }
-  // 범위 파라미터(r1/r2)를 쓰면 fzr(고정 행 반복)이 무시됨 —
-  // 대신 필요 없는 행/열을 잠시 숨기고 시트 전체를 내보낸다.
-  // 1~8행 반복은 시트에서 [보기 > 고정 > 8행까지] 고정해야 동작.
-  var maxRows = sh.getMaxRows(), maxCols = sh.getMaxColumns();
-  var hideRowCount = maxRows - lastRow;   // lastRow 아래
-  var hideColCount = maxCols - 7;         // H열부터 (B1:G 범위 유지)
-  // 고정(freeze)된 열은 숨길 수 없음 — 고정 열이 있으면 A열 숨기기는 건너뜀
-  var hideColA = sh.getFrozenColumns() < 1;
-  if (hideRowCount > 0) sh.hideRows(lastRow + 1, hideRowCount);
-  if (hideColA) sh.hideColumns(1); // A열
-  if (hideColCount > 0) sh.hideColumns(8, hideColCount);
-  SpreadsheetApp.flush();
-  var url = 'https://docs.google.com/spreadsheets/d/' + SS.getId() + '/export' +
-    '?format=pdf&gid=' + sh.getSheetId() +
-    '&size=letter&portrait=true&fitw=true&fzr=true' +
-    '&gridlines=false&sheetnames=false&printtitle=false&pagenum=false';
-  try {
-    var res = UrlFetchApp.fetch(url, {
-      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-    });
-    return res.getBlob().setName(fileName + '.pdf');
-  } finally {
-    // 내보내기 후 원상복구
-    if (hideRowCount > 0) sh.showRows(lastRow + 1, hideRowCount);
-    if (hideColA) sh.showColumns(1);
-    if (hideColCount > 0) sh.showColumns(8, hideColCount);
-  }
-}
+function backupOrderTab_(sh, tabName, department) {
+  var deptKey = String(department || 'PRODUCT').trim().toUpperCase();
+  var config = DEPT_CONFIG[deptKey] || DEPT_CONFIG['PRODUCT'];
 
-// Order Backup 파일에 탭 복사 (값+서식, 수식은 값으로 고정)
-function backupOrderTab_(sh, tabName) {
+  // 부서별 이미지 ID 설정
+  var imageId = (deptKey === 'GM') 
+    ? '13kuGkgRIpVja2DKvx8gF4UOsL2EEIEWT' 
+    : '1YLTWSPjZfqURaPdLmexaOsSDmos5P9Ad';
+  var imageUrl = 'https://drive.google.com/uc?id=' + imageId;
 
+  var backupSS = SpreadsheetApp.openById(config.orderFileId);
   
-  //이미지 주소 받기 08.05
-  var userId = sh.getRange("G3").getValue();
-
-  var users = sh.getParent()
-  .getSheetByName("USERS")
-  .getRange("A:C")
-  .getValues();
-
-  var imageUrl = "";
-
-  for (var i = 0; i < users.length; i++) {
-  if (String(users[i][0]).trim() == String(userId).trim()) {
-    imageUrl = "https://drive.google.com/uc?id=" + users[i][2];
-    break;
-  }
-  }
-  //이미지 받기 끝
-
-  var userEmail = String(sh.getRange('G3').getValue() || '').trim().toLowerCase();
-  var targetFolderId = BACKUP_FOLDER_ID;
-  var targetFileName = BACKUP_FILE_NAME;
-
-  if (JL_EMAILS.indexOf(userEmail) !== -1) {
-    targetFolderId = JLFOLDERID;
-    targetFileName = JLFILENAME;
-  }
-
-  var folder = DriveApp.getFolderById(targetFolderId);
-  var files = folder.getFilesByName(targetFileName);
-  var backupSS;
-  if (files.hasNext()) {
-    backupSS = SpreadsheetApp.open(files.next());
-  } else {
-    backupSS = SpreadsheetApp.create(targetFileName);
-    DriveApp.getFileById(backupSS.getId()).moveTo(folder);
-  }
   var copied = sh.copyTo(backupSS).setName(tabName.slice(0, 100));
 
   // 실제 데이터가 있는 마지막 행 찾기 (B열 기준, 최소 9행) — 수천 행 전체 복사 방지
@@ -710,33 +734,81 @@ function backupOrderTab_(sh, tabName) {
   });
   copied.getRange(1, 1, lastRow, numCols).setValues(vals);
 
+  // 이미지 박제
+  copied.getRange("B1").setFormula('=IMAGE("' + imageUrl + '")');
 
-  //이미지 박제
-  if (imageUrl) {
-  copied.getRange("B1").setFormula(
-    '=IMAGE("' + imageUrl + '")'
-  );
-}
-  //시트 주소 박기
+  // 시트 주소 박기
   copied.getRange("G4").setFormula('=IFERROR(GET_FULL_URL(),"")');
   
-  //아래 셀에 메세지 입력 유도
+  // 아래 셀에 메세지 입력 유도
   copied.getRange("E5").setFormula('IF(G1="7 DOLLAR","메시지 아래 입력","")');
-
 
   // 데이터 아래 남은 깨진 수식(#REF!) 정리
   var maxR = copied.getMaxRows();
   if (maxR > lastRow) copied.getRange(lastRow + 1, 1, maxR - lastRow, numCols).clearContent();
 }
 
+// 외부 스프레드시트 월별 탭에 발주 내역 기록
+function logOrderToExternalSheet_(body, pdfUrl, department) {
+  var deptKey = String(department || body.department || 'PRODUCT').trim().toUpperCase();
+  
+  // 부서별 외부 시트 ID 설정 (PRODUCT 시트 생성 후 아래 PRODUCT 주소만 교체)
+  var sheetIds = {
+    'GM': '1h9W5COqxs56N8gkqEBvuupHPHZ0Hf43-Hihrwg1b9Fw',
+    'PRODUCT': '1h9W5COqxs56N8gkqEBvuupHPHZ0Hf43-Hihrwg1b9Fw'
+  };
+  var logSheetId = sheetIds[deptKey] || sheetIds['PRODUCT'];
+  
+  var ss = SpreadsheetApp.openById(logSheetId);
+  
+  var now = new Date();
+  var monthNames = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
+  var monthTabName = monthNames[now.getMonth()];
+  
+  var sh = ss.getSheetByName(monthTabName);
+  if (!sh) return; // 해당 월의 탭이 없으면 에러 없이 패스
+  
+  var formattedDate = Utilities.formatDate(now, TIMEZONE, 'MM/dd/yyyy');
+  var store = body.store || '';
+  var vendor = body.vendor || '';
+  var jorderid = body.jorderid || '';
+  var total = body.total || 0;
+  
+  // A3 이후 첫 빈 행 찾기 (A열 데이터 기준)
+  var targetRow = 3;
+  var lastRow = sh.getLastRow();
+  if (lastRow >= 3) {
+    var aValues = sh.getRange(3, 1, lastRow - 2, 1).getValues();
+    for (var i = 0; i < aValues.length; i++) {
+      if (String(aValues[i][0]).trim() !== '') {
+        targetRow = i + 4; // 0-index 기준(i)에서 실제 행 번호 계산
+      }
+    }
+  }
+  
+  // E열: PDF 링크가 있고 order ID도 있으면 하이퍼링크 수식 적용, 아니면 일반 텍스트
+  var orderIdVal = '';
+  if (jorderid) {
+    orderIdVal = pdfUrl ? '=HYPERLINK("' + pdfUrl + '", "' + jorderid + '")' : jorderid;
+  }
+  
+  // A, B, C, D, E, F, G, H 열에 맞게 배열 구성
+  var rowData = [[
+    formattedDate, 
+    store, 
+    '', 
+    vendor, 
+    orderIdVal, 
+    '', 
+    '', 
+    total
+  ]];
+  
+  // 찾은 빈 행에 한 번에 값 쓰기 (수식은 자동으로 텍스트 수식으로 파싱됨)
+  sh.getRange(targetRow, 1, 1, 8).setValues(rowData);
+}
+
 /* ============================ EXPORT ============================= */
-
-var BACKUP_FOLDER_ID = '0AD5atSBCNOrfUk9PVA';  //sam
-var SHEXFILENAME = 'SAMS EXPORTED ORDERS';         //sam  
-var JLFOLDERID = '1zumfLOoj2BQ41djL5JWlsPRKXIQ1IcrP';  //JOON
-var JLEXFILENAME = 'JOONS EXPORTED ORDERS';         //JOON   
-var JL_EMAILS = ['joonlim@jennybs.com','happa.yon12@gmail.com','jini801113@gmail.com'];        // 이메일 추가 가능
-
 
 // EXPORT 흐름: 탭 기록 → 백업 탭 저장 → 원본 초기화
 function recordExport_(body) {
@@ -786,7 +858,10 @@ function recordExportInner_(sh, body) {
   sh.getRange('D4').setValue(body.shipToJBS ? 'JBS' : (body.store || ''));
   sh.getRange('G1').setValue(body.vendor || '');
   sh.getRange('G2').setValue(new Date());
-  sh.getRange('G3').setValue(String(body.user || '').trim());
+  sh.getRange('G3').setValue(String(body.user || '').trim()); // 발주자 이메일 기록
+
+  var tpl2 = SS.getSheetByName('TEMPLATE 2');
+  if (tpl2) tpl2.getRange('K3').setValue(String(body.user || '').trim());
 
   var items = body.items || [];
   if (items.length) {
@@ -813,7 +888,7 @@ function recordExportInner_(sh, body) {
   var tabName = (body.vendor || 'EXPORT') + ' ' + stamp;
 
   try {
-    backupExportTab_(sh, tabName);
+    backupExportTab_(sh, tabName, body.department);
   } catch (err) {
     throw new Error('[EXPORT BACKUP] ' + err);
   }
@@ -828,47 +903,17 @@ function recordExportInner_(sh, body) {
 }
 
 // Export Backup 파일에 탭 복사
-function backupExportTab_(sh, tabName) {
+function backupExportTab_(sh, tabName, department) {
 
-  //이미지 주소 받기 08.05
-  var userId = sh.getRange("G3").getValue();
+  var deptKey = String(department || 'PRODUCT').trim().toUpperCase();
+  var config = DEPT_CONFIG[deptKey] || DEPT_CONFIG['PRODUCT'];
+  var backupSS = SpreadsheetApp.openById(config.exportFileId);
 
-  var users = sh.getParent()
-  .getSheetByName("USERS")
-  .getRange("A:C")
-  .getValues();
-
-  var imageUrl = "";
-
-  for (var i = 0; i < users.length; i++) {
-  if (String(users[i][0]).trim() == String(userId).trim()) {
-    imageUrl = "https://drive.google.com/uc?id=" + users[i][2];
-    break;
-  }
-  }
-  //이미지 받기 끝
-
-  var userEmail = String(sh.getRange('G3').getValue() || '').trim().toLowerCase();
-
-  var targetFolderId = BACKUP_FOLDER_ID;
-  var targetFileName = SHEXFILENAME;
-
-  if (JL_EMAILS.indexOf(userEmail) !== -1) {
-    targetFolderId = JLFOLDERID;
-    targetFileName = JLEXFILENAME;
-  }
-
-  var folder = DriveApp.getFolderById(targetFolderId);
-  var files = folder.getFilesByName(targetFileName);
-
-  var backupSS;
-
-  if (files.hasNext()) {
-    backupSS = SpreadsheetApp.open(files.next());
-  } else {
-    backupSS = SpreadsheetApp.create(targetFileName);
-    DriveApp.getFileById(backupSS.getId()).moveTo(folder);
-  }
+  // 부서별 이미지 ID 설정
+  var imageId = (deptKey === 'GM') 
+    ? '13kuGkgRIpVja2DKvx8gF4UOsL2EEIEWT' 
+    : '1YLTWSPjZfqURaPdLmexaOsSDmos5P9Ad';
+  var imageUrl = 'https://drive.google.com/uc?id=' + imageId;
 
   var copied = sh.copyTo(backupSS).setName(tabName.slice(0, 100));
 
@@ -893,13 +938,8 @@ function backupExportTab_(sh, tabName) {
   copied.getRange(1, 1, lastRow, numCols).setValues(vals);
 
   //이미지 박제
-  if (imageUrl) {
-  copied.getRange("B1").setFormula(
-    '=IMAGE("' + imageUrl + '")'
-  );
-}
-  //이미지 박제 종료
-
+  copied.getRange("B1").setFormula('=IMAGE("' + imageUrl + '")');
+  
   var maxR = copied.getMaxRows();
 
   if (maxR > lastRow) {
@@ -916,67 +956,56 @@ function json_(obj) {
 
 /* ========================= IMPORT / GET TABS ========================= */
 
-// 1. 사용자 이메일 ↔ 시트 ID 매핑 (확장성 확보)
-var EXPORT_USER_MAPPING = {
-  'joonlim@jennybs.com': '1bZpSO5BFvdKBTc1u9vrK7SlulyagzXFKnmkf3XwwUdM',
-  'samhong@jennybs.com': '1FqeMQ3ygjcr8S_gadDw4_UtLxo21ETBfwgLsNSqHxkU',
-  'sangklee12@gmail.com': '1FqeMQ3ygjcr8S_gadDw4_UtLxo21ETBfwgLsNSqHxkU',
-  'happa.yon12@gmail.com': '1bZpSO5BFvdKBTc1u9vrK7SlulyagzXFKnmkf3XwwUdM',
-  'jini801113@gmail.com': '1bZpSO5BFvdKBTc1u9vrK7SlulyagzXFKnmkf3XwwUdM',
-  'andyhong12@gmail.com': '1FqeMQ3ygjcr8S_gadDw4_UtLxo21ETBfwgLsNSqHxkU'
-  // 직원추가
-};
-
-// 2. 사용자 이메일에 맞춰 다이렉트로 백업 파일을 여는 함수
-function getExportBackupFile_(email) {
-  var userEmail = String(email || '').trim().toLowerCase();
-  var fileId = EXPORT_USER_MAPPING[userEmail];
+// 부서(department)에 맞춰 다이렉트로 백업 파일을 여는 함수
+function getExportBackupFile_(department) {
+  var deptKey = String(department || 'PRODUCT').trim().toUpperCase();
+  var config = DEPT_CONFIG[deptKey] || DEPT_CONFIG['PRODUCT'];
   
-  if (fileId) {
-    try {
-      return SpreadsheetApp.openById(fileId);
-    } catch(e) {
-      return null;
-    }
+  try {
+    return SpreadsheetApp.openById(config.exportFileId);
+  } catch(e) {
+    return null;
   }
-  
-  // 만약 매핑 테이블에 없는 사용자라면, 기존 Export 로직처럼 폴더/이름으로 백업 시트를 검색(안전망)
-  var targetFolderId = BACKUP_FOLDER_ID;
-  var targetFileName = SHEXFILENAME;
-  if (JL_EMAILS.indexOf(userEmail) !== -1) {
-    targetFolderId = JLFOLDERID;
-    targetFileName = JLEXFILENAME;
-  }
-  var folder = DriveApp.getFolderById(targetFolderId);
-  var files = folder.getFilesByName(targetFileName);
-  if (files.hasNext()) return SpreadsheetApp.open(files.next());
-  
-  return null;
 }
 
-// 3. getTabs 로직
+// getTabs 로직 (관리자 전체 조회 / 일반 사용자 D3 셀 이메일 매칭)
 function handleGetTabs_(body) {
   var email = String(body.userEmail || '').trim().toLowerCase();
   if (!email) return { ok: false, error: 'User email is required' };
   
-  var backupSS = getExportBackupFile_(email);
+  var backupSS = getExportBackupFile_(body.department);
   if (!backupSS) return { ok: true, tabs: [] }; // 백업 파일이 아직 없으면 빈 목록
+
+  // 관리자 이메일 목록
+  var ADMIN_EMAILS = ['samhong@jennybs.com', 'joonlim@jennybs.com'];
+  var isAdmin = ADMIN_EMAILS.indexOf(email) !== -1;
 
   var sheets = backupSS.getSheets();
   var tabs = [];
   
   // 최신 데이터가 맨 위에 오도록 역순으로 가져오기
   for (var i = sheets.length - 1; i >= 0; i--) {
-    var name = sheets[i].getName();
-    // 기본 빈 시트('Sheet'로 시작하는 시트)는 제외하고 발주서 탭만 모음
+    var sh = sheets[i];
+    var name = sh.getName();
+    
+    // 기본 빈 시트('Sheet'로 시작하는 시트)는 제외
     if (name.indexOf('Sheet') !== 0) {
-      tabs.push(name);
+      if (isAdmin) {
+        // 관리자는 해당 파일 내의 모든 발주서 탭을 볼 수 있음
+        tabs.push(name);
+      } else {
+        // 일반 사용자는 G3 셀의 이메일과 로그인 이메일이 일치할 때만 목록에 추가
+        var d3Email = String(sh.getRange("G3").getValue() || '').trim().toLowerCase();
+        if (d3Email === email) {
+          tabs.push(name);
+        }
+      }
     }
   }
   return { ok: true, tabs: tabs };
 }
 
-// 4. import 로직 (추출 후 탭 자동 삭제)
+// import 로직 (추출 후 탭 자동 삭제)
 function handleImport_(body) {
   var email = String(body.userEmail || '').trim().toLowerCase();
   var tabName = body.tabName;
@@ -984,13 +1013,13 @@ function handleImport_(body) {
   if (!email) return { ok: false, error: 'User email is required' };
   if (!tabName) return { ok: false, error: 'Tab name is required' };
   
-  var backupSS = getExportBackupFile_(email);
+  var backupSS = getExportBackupFile_(body.department);
   if (!backupSS) return { ok: false, error: 'Backup file not found' };
   
   var sh = backupSS.getSheetByName(tabName);
   if (!sh) return { ok: false, error: 'Tab not found: ' + tabName };
   
-  // 4-1. 데이터 파싱 (요청하신 B4, D4, G1 좌표 기준)
+  // 데이터 파싱 (요청하신 B4, D4, G1 좌표 기준)
   var storeName = String(sh.getRange("B4").getValue() || '').trim();
   var d4Value = String(sh.getRange("D4").getValue() || '').trim().toUpperCase();
   var vendorName = String(sh.getRange("G1").getValue() || '').trim();
@@ -1026,13 +1055,7 @@ function handleImport_(body) {
     }
   }
   
-  // 4-3. 데이터 추출 완료 후 해당 탭(시트) 영구 삭제
-  // 시트 파일에는 무조건 1개 이상의 탭이 있어야 에러가 나지 않음. 
-  // 만약 탭이 1개뿐이라면 안전하게 빈 'Sheet1'을 임시로 만들어 주고 삭제.
-  if (backupSS.getSheets().length <= 1) {
-    backupSS.insertSheet('Sheet1');
-  }
-  backupSS.deleteSheet(sh);
+  //앱으로 데이터를 안전하게 전송하기 위해 이 단계에서는 탭을 삭제하지 않습니다.
   
   return {
     ok: true,
@@ -1041,4 +1064,24 @@ function handleImport_(body) {
     shipToJBS: shipToJBS,
     items: items
   };
+}
+
+// 2-Step 삭제 신호를 앱으로부터 성공적으로 받았을 때 실행되는 탭 삭제 함수
+function handleDeleteTab_(body) {
+  var tabName = body.tabName;
+  if (!tabName) return { ok: false, error: 'Tab name is required' };
+  
+  var backupSS = getExportBackupFile_(body.department);
+  if (!backupSS) return { ok: false, error: 'Backup file not found' };
+  
+  var sh = backupSS.getSheetByName(tabName);
+  if (!sh) return { ok: false, error: 'Tab not found or already deleted' };
+
+  // 시트 파일에는 무조건 1개 이상의 탭이 있어야 에러가 나지 않음
+  if (backupSS.getSheets().length <= 1) {
+    backupSS.insertSheet('Sheet1');
+  }
+  backupSS.deleteSheet(sh);
+  
+  return { ok: true, message: 'Tab safely deleted' };
 }
