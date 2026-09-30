@@ -216,7 +216,10 @@ const listData = React.useMemo(() => {
       {/* frozen top panel */}
       <View style={[styles.topPanel, { paddingTop: topPad + 8, backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <View style={styles.totalRow}>
-          <Pressable onPress={app.toggleHaptic}>
+          <Pressable 
+            onPress={app.toggleHaptic}
+            hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+          >
             <Text style={[styles.totalLabel, { color: colors.mutedForeground }]}>TOTAL</Text>
           </Pressable>
           <Text style={[styles.totalValue, { color: colors.primary, fontSize: 22 * fs }, app.isHapticDisabled && { fontStyle: 'italic' }]}>

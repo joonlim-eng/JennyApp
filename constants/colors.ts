@@ -116,7 +116,7 @@ export const themes: Record<string, Palette> = {
     totalCard: '#D35D14',
     sendBtn: '#3E7C41',
     exportBtn: '#423225',
-    saveBtn: '#8C7C6F',
+    saveBtn: '#D4A373',
     loadBtn: '#DE7A2F',
     secondary: '#EBE2D5',
     secondaryForeground: '#423225',

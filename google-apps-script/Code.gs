@@ -14,8 +14,13 @@ function doGet(e) {
     var serverVer = shApp ? String(shApp.getRange('G1').getValue() || '').trim() : '';
     var clientVer = String((e && e.parameter && e.parameter.v) || '').trim();
 
-    // 앱 버전이 서버 D1 값과 안 맞으면 로그인/데이터 처리 단 한 줄도 실행 안 하고 즉시 차단
-    if (serverVer && clientVer !== serverVer) {
+    // x.x 까지만 추출하는 함수 (예: "1.2.3" -> "1.2")
+    function getMajorMinor_(v) {
+      var parts = v.split('.');
+      return parts.length >= 2 ? parts[0] + '.' + parts[1] : v;
+    }
+
+    if (serverVer && getMajorMinor_(clientVer) !== getMajorMinor_(serverVer)) {
       return json_({ 
         ok: false, 
         error: 'UPDATE_REQUIRED', 
@@ -64,11 +69,14 @@ function doPost(e) {
   //입구컷 시작
     var shApp = SS.getSheetByName('APPEARANCE');
     var serverVer = shApp ? String(shApp.getRange('G1').getValue() || '').trim() : '';
-    // POST 요청은 body.v 또는 URL 파라미터(e.parameter.v)에서 버전을 확인합니다.
     var clientVer = String(body.v || (e && e.parameter && e.parameter.v) || '').trim();
 
-    // D1 불일치 바로 차단 (checkUpdate 요청은 검사 제외)
-    if (body.action !== 'checkUpdate' && serverVer && clientVer !== serverVer) {
+    function getMajorMinor_(v) {
+      var parts = v.split('.');
+      return parts.length >= 2 ? parts[0] + '.' + parts[1] : v;
+    }
+
+    if (body.action !== 'checkUpdate' && serverVer && getMajorMinor_(clientVer) !== getMajorMinor_(serverVer)) {
       return json_({ 
         ok: false, 
         error: 'UPDATE REQUIRED', 
@@ -366,7 +374,7 @@ function getAppearance_() {
 function saveAppearance_(body) {
   var map = body.appearance || {};
   var sh = SS.getSheetByName('APPEARANCE') || SS.insertSheet('APPEARANCE');
-  sh.clearContents();
+  sh.getRange('A:B').clearContent();
   sh.getRange(1, 1, 1, 2).setValues([['PARAMETER', 'VALUE']]); // 제목 행 유지
   var keys = Object.keys(map);
   if (keys.length) {

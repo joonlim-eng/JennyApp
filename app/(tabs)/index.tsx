@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -12,6 +13,8 @@ import {
   View,
   Linking,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather, MaterialCommunityIcons } from '@/components/AppIcon';
 import { useColors } from '@/hooks/useColors';
@@ -39,258 +42,33 @@ export default function HomeScreen() {
   const fs = useFontScale();
   const app = useApp();
 
-  const [savedSelection, setSavedSelection] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const [sending, setSending] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [checkingVersion, setCheckingVersion] = useState(false);
-
-  const handleCheckVersion = async () => {
-    if (checkingVersion) return;
-    
-    const url = app.settings.appsScriptUrl?.trim();
-    if (!url) {
-      notify('Notice', 'Apps Script URL is not set.');
-      return;
-    }
-
-    setCheckingVersion(true);
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'checkUpdate', v: app.appVersion }),
-      });
-      
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json().catch(() => ({}));
-      
-      if (data && data.latestVersion) {
-        if (data.latestVersion > app.appVersion) {
-          const ok = await confirmAsync(
-            'Update Available',
-            `Latest Version (${data.latestVersion})is available.\nDownload it now?`
-          );
-          if (ok && data.downloadUrl) {
-            Linking.openURL(data.downloadUrl);
-          }
-        } else {
-          notify('최신 버전', 'App is up to date');
-        }
-      } else {
-        //  서버가 보낸 실제 응답을 그대로 화면에 띄우기
-        notify('서버 응답 확인', `응답 데이터:\n${JSON.stringify(data)}`);
-      }
-    } catch (e: any) {
-      notify('통신 에러', `에러 내용:\n${e?.message ?? ''}`);
-    } finally {
-      setCheckingVersion(false);
-    }
-  };
-
-  // Import 관련 추가 UI 상태
-  const [importModalVisible, setImportModalVisible] = useState(false);
-  const [loadingTabs, setLoadingTabs] = useState(false);
-  const [tabList, setTabList] = useState<string[]>([]);
-  const [importingTab, setImportingTab] = useState(false);
-
-  const handleSync = async () => {
-    if (syncing) return;
-    setSyncing(true);
-    try {
-      const res = await app.syncFromSheets();
-      if (!res.ok) notify('Sync failed', res.message);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
-
-  const store = app.stores.find((s) => s.id === app.selectedStoreId);
-  const vendor = app.vendors.find((v) => v.id === app.selectedVendorId);
   const c = (k: string, f: string) => app.appearance[k] || f;
 
-  const guardedChange = (kind: 'store' | 'vendor', id: string | null) => {
-    const current = kind === 'store' ? app.selectedStoreId : app.selectedVendorId;
-    const apply = () => {
-      if (kind === 'store') app.setSelectedStoreId(id);
-      else app.setSelectedVendorId(id);
-    };
-    if (app.cart.length === 0 || id === current) {
-      apply();
-      return;
-    }
-    if (kind === 'vendor') {
-      const saved = app.saveCart();
-      if (saved) notify('Auto-saved', `Cart saved as:\n${saved.name}`);
-      else app.clearCart();
-      apply();
-      return;
-    }
+  // --- 비즈니스 로직 훅(Hook) 호출 ---
+  const { gifUri, gifAspectRatio, handleTotalPress } = useHeaderGif();
+  const { checkingVersion, handleCheckVersion } = useAppVersion();
+  const { 
+    guardedChange, savedSelection, setSavedSelection, handleSave, handleLoad,
+    sending, exporting, syncing, handleSend, executeExport, handleSync 
+  } = useOrderAndCartManager();
+  const { 
+    importModalVisible, loadingTabs, importingTab, tabList, 
+    openImportModal, closeImportModal, handleSelectTab 
+  } = useImportActions();
 
-    const doSave = () => {
-      const saved = app.saveCart();
-      if (saved) notify('Cart saved', saved.name);
-      apply();
-    };
-    const doChange = () => apply();
-
-    if (Platform.OS === 'web') {
-      if (window.confirm('Cart has items.\n\nSave the cart before changing store?\n(Cancel = more options)')) {
-        doSave();
-      } else if (window.confirm('Change store and keep the cart as is?\n(Cancel = keep current store)')) {
-        doChange();
-      }
-      return;
-    }
-    Alert.alert('Cart has items', 'What would you like to do?', [
-      { text: 'SAVE CART', onPress: doSave },
-      { text: 'CHANGE STORE', onPress: doChange },
-      { text: 'CANCEL', style: 'cancel' },
-    ]);
-  };
-
-  const buildOrderPayload = () => {
-    const items = app.cart.map((c) => {
-      const p = app.findByUpc(c.upc);
-      
-      const originalItemCode = p?.itemCode ?? '';
-      const parts = originalItemCode.split('/');
-      const baseCode = parts[0].trim();
-      
-      // 1. 선택된 옵션이 없으면, 원본 코드의 첫 번째 옵션을 기본값으로 가져옵니다.
-      const defaultOpt = parts.length > 1 ? parts[1].trim() : '';
-      const activeOpt = c.opt || defaultOpt;
-
-      // 2. 최종 옵션(activeOpt)이 존재하면 결합하고, 아예 옵션이 없는 상품이면 baseCode만 사용합니다.
-          const finalItemCode = activeOpt ? `${baseCode} / ${activeOpt}` : baseCode;
-          
-          // 3. 옵션이 있는 경우에만 calcPrice 연산 적용 (나머지는 bypass하여 속도 최적화)
-          const baseCost = p?.cost ?? 0;
-          const finalPrice = activeOpt ? calcPrice(baseCost, originalItemCode, c.opt) : baseCost;
-
-          return {
-            upc: c.upc,
-            itemCode: finalItemCode,
-            description: p?.description ?? '',
-            cost: finalPrice,
-            qty: c.qty,
-            amount: finalPrice * c.qty,
-          };
-        });
-        
-    return {
-      v: app.appVersion,
-      type: 'order',
-      store: store?.name ?? '',
-      storeAddress: app.shipToJBS
-        ? app.stores.find((s) => s.name.startsWith('JBS'))?.address ?? ''
-        : store?.address ?? '',
-      shipToJBS: app.shipToJBS,
-      department: app.department,
-      vendor: vendor?.name ?? '',
-      vendorEmail: vendor?.email ?? '',
-      user: app.session?.email ?? '',
-      total: app.cartTotal,
-      createdAt: new Date().toISOString(),
-      jorderid: app.generateJOrderId(),
-      items,
-    };
-  };
-
-  const requireReady = (): boolean => {
-    if (!app.selectedStoreId) { notify('Notice', 'Select a store'); return false; }
-    if (!app.selectedVendorId) { notify('Notice', 'Select a vendor'); return false; }
-    if (app.cart.length === 0) { notify('Notice', 'Cart is empty'); return false; }
-    return true;
-  };
-
-  const handleSend = async () => {
-    if (!requireReady()) return;
-    const url = app.settings.appsScriptUrl.trim();
-    if (!url) {
-      notify('Setup required', 'Register the Apps Script URL in the SETTING tab first.\nOrders cannot be sent until it is set.');
-      return;
-    }
-    const ok = await confirmAsync(
-      'Send Order',
-      `Send ${vendor?.name ?? ''} order?\nTotal $${app.cartTotal.toFixed(2)}\n\nThe order will be emailed to the vendor.`
-    );
-    if (!ok) return;
-    setSending(true);
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(buildOrderPayload()),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json().catch(() => ({}));
-      setSending(false);
-      if (data && data.busy) {
-        notify('Server busy', '서버에서 다른 일 처리 중에 있습니다.\n잠시 후에 다시 시도해 주세요.');
-        return;
-      }
-      if (data && data.ok === false) {
-        notify('Send failed', `An error occurred while sending the order.\n${data.error ?? ''}`);
-        return;
-      }
-      if (data && data.emailed === false) {
-      notify(
-      'Sent', // 타이틀은 상황에 맞게 유지 (필요시 'Sent'로 변경 가능)
-      `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`);
-     } else {
-      notify(
-      'Sent', 
-      `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`);
-     }
-      app.clearCart();
-    } catch (e: any) {
-      setSending(false);
-      notify('Send failed', `An error occurred while sending the order.\n${e?.message ?? ''}`);
-    }
-  };
-
-  const handleSave = () => {
-    if (!requireReady()) return;
-    const saved = app.saveCart();
-    if (saved) notify('Saved', saved.name);
-  };
-
-  const handleLoad = () => {
-    if (!savedSelection) { notify('Notice', 'Select a saved order to load'); return; }
-
-    if (app.cart.length > 0) {
-      const saved = app.saveCart();
-      if (saved) {
-        notify('Auto-saved', `Current cart saved as:\n${saved.name}`);
-      }
-    }
-
-    app.loadCart(savedSelection);
-    setSavedSelection(null);
-    notify('Loaded', 'Saved order moved into cart');
-  };
-
-  // Export / Import 선택 핸들러
-  const handleExport = async () => {
+  // Export/Import 통합 핸들러
+  const handleExportOptions = async () => {
     const url = app.settings.appsScriptUrl.trim();
     if (!url) {
       notify('Setup required', 'Register the Apps Script URL in the SETTING tab first.');
       return;
     }
-
     if (Platform.OS === 'web') {
-      const isExport = window.confirm('Click [OK] to EXPORT or [Cancel] to IMPORT from Google Sheet');
-      if (isExport) {
-        executeExport(url);
-      } else {
-        openImportModal();
-      }
+      if (window.confirm('Click [OK] to EXPORT or [Cancel] to IMPORT from Google Sheet')) executeExport(url);
+      else openImportModal();
       return;
     }
-
     Alert.alert('Excel Options', 'Choose an action for Google Sheets', [
       { text: 'EXPORT', onPress: () => executeExport(url) },
       { text: 'IMPORT', onPress: openImportModal },
@@ -298,177 +76,60 @@ export default function HomeScreen() {
     ]);
   };
 
-  // 기존 Export 실행
-  const executeExport = async (url: string) => {
-    if (!requireReady()) return;
-
-    const ok = await confirmAsync('Export', `Export ${vendor?.name ?? ''} order?`);
-    if (!ok) return;
-
-    setExporting(true);
-    try {
-      const payload = {
-        ...buildOrderPayload(),
-        action: 'export',
-      };
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json().catch(() => ({}));
-      setExporting(false);
-
-      if (data && data.busy) {
-        notify('Server busy', 'Server is processing another export.\nPlease try again shortly.');
-        return;
-      }
-
-      if (data && data.ok === false) {
-        notify('Export failed', data.error ?? 'Unknown error');
-        return;
-      }
-
-      notify('Export Complete', `${vendor?.name ?? ''} exported successfully.`);
-      app.clearCart();
-    } catch (e: any) {
-      setExporting(false);
-      notify('Export failed', e?.message ?? 'Unknown error');
-    }
-  };
-
-  // Import 모달 열기 및 Context를 통한 탭 목록 수신
-  const openImportModal = async () => {
-    setLoadingTabs(true);
-    setImportModalVisible(true);
-    try {
-      if (app.getTabList) {
-        const res = await app.getTabList();
-        if (res.ok && res.tabs) {
-          setTabList(res.tabs);
-        } else {
-          notify('Failed', res.message || 'Failed to fetch sheet tabs');
-          setImportModalVisible(false);
-        }
-      }
-    } catch (e: any) {
-      notify('Failed', e?.message ?? 'Failed to connect server');
-      setImportModalVisible(false);
-    } finally {
-      setLoadingTabs(false);
-    }
-  };
-
-  // 탭 선택 시 처리 (카트 저장 후 Context의 importFromSheet 호출)
-  const handleSelectTab = async (tabName: string) => {
-    if (app.cart.length > 0) {
-      const saved = app.saveCart();
-      if (saved) {
-        notify('Auto-saved', `Current cart auto-saved as:\n${saved.name}`);
-      }
-    }
-
-    setImportingTab(true);
-    try {
-      if (app.importFromSheet) {
-        const res = await app.importFromSheet(tabName);
-        if (res.ok) {
-          notify('Import Success', `Loaded sheet tab: ${tabName}`);
-          setImportModalVisible(false);
-        } else {
-          notify('Import Failed', res.message || 'Failed to import tab data');
-        }
-      }
-    } catch (e: any) {
-      notify('Import Failed', e?.message ?? 'Failed to import tab data');
-    } finally {
-      setImportingTab(false);
-    }
-  };
-
   return (
     <View style={[styles.container, { backgroundColor: c('home.bg', colors.background) }]}>
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16 }]}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16 }]} showsVerticalScrollIndicator={false}>
+        
         <View style={styles.header}>
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text 
-                style={[styles.brand, { color: c('home.brandColor', colors.primary), fontSize: 20 * fs }]}
-                onPress={handleCheckVersion}
-              >
+              <Text style={[styles.brand, { color: c('home.brandColor', colors.primary), fontSize: 20 * fs }]} onPress={handleCheckVersion}>
                 {app.settings.appTitle}
               </Text>
               {checkingVersion && <ActivityIndicator size="small" color={colors.primary} />}
             </View>
-            <Text style={[styles.userEmail, { color: colors.mutedForeground, fontSize: 12 * fs }]}>
-              {app.session?.email}
-            </Text>
+            <Text style={[styles.userEmail, { color: colors.mutedForeground, fontSize: 12 * fs }]}>{app.session?.email}</Text>
           </View>
+
+          {gifUri && (
+            <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 8 }}>
+              <Image source={{ uri: gifUri }} style={{ height: 45
+                , maxWidth: '100%', aspectRatio: gifAspectRatio }} resizeMode="contain" />
+            </View>
+          )}
+
           <View style={styles.headerActions}>
-            <Pressable
-              onPress={handleSync}
-              disabled={syncing}
-              style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.5 }]}
-              testID="sync-now"
-            >
-              {syncing ? (
-                <ActivityIndicator size="small" color={colors.mutedForeground} />
-              ) : (
-                <Feather name="refresh-cw" size={20} color={colors.mutedForeground} />
-              )}
+            <Pressable onPress={handleSync} disabled={syncing} style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.5 }]} testID="sync-now">
+              {syncing ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <Feather name="refresh-cw" size={20} color={colors.mutedForeground} />}
             </Pressable>
-            <Pressable
-              onPress={app.logout}
-              style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.5 }]}
-              testID="logout"
-            >
+            <Pressable onPress={app.logout} style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.5 }]} testID="logout">
               <Feather name="log-out" size={20} color={colors.mutedForeground} />
             </Pressable>
           </View>
         </View>
 
-        <View style={[styles.totalCard, { backgroundColor: c('home.totalCardColor', colors.totalCard ?? colors.primary) }]}>
-          <Text style={[styles.totalLabel, colors.totalLabel ? { color: colors.totalLabel } : null]}>
-            {c('home.totalLabel', 'TOTAL')}
-          </Text>
-          <Text style={[styles.totalValue, { fontSize: 36 * fs }]}>
-            ${app.cartTotal.toFixed(2)}
-          </Text>
+        <Pressable
+          onPress={handleTotalPress}
+          style={({ pressed }) => [styles.totalCard, { backgroundColor: c('home.totalCardColor', colors.totalCard ?? colors.primary) }, pressed && { opacity: 0.95 }]}
+        >
+          <Text style={[styles.totalLabel, colors.totalLabel ? { color: colors.totalLabel } : null]}>{c('home.totalLabel', 'TOTAL')}</Text>
+          <Text style={[styles.totalValue, { fontSize: 36 * fs }]}>${app.cartTotal.toFixed(2)}</Text>
           <Text style={[styles.totalSub, colors.totalLabel ? { color: colors.totalLabel } : null]}>
             {app.cart.length} items · {app.cart.reduce((s, c) => s + c.qty, 0)} units
           </Text>
-        </View>
+        </Pressable>
 
         <View style={styles.section}>
           <View style={[styles.toggleRow, { justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 0, marginTop: 0 }]}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 0 }]}>
-              {c('home.storeLabel', 'SELECT STORE')}
-            </Text>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 0 }]}>{c('home.storeLabel', 'SELECT STORE')}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={[styles.toggleLabel, { color: colors.foreground, fontSize: 12.5 * fs }]}>
-                {c('home.shipLabel', 'SHIP TO JBS')}
-              </Text>
-              <Switch
-                value={app.shipToJBS}
-                onValueChange={app.setShipToJBS}
-                trackColor={{ true: colors.accent, false: colors.border }}
-                thumbColor="#fff"
-                testID="ship-to-jbs"
-              />
+              <Text style={[styles.toggleLabel, { color: colors.foreground, fontSize: 12.5 * fs }]}>{c('home.shipLabel', 'SHIP TO JBS')}</Text>
+              <Switch value={app.shipToJBS} onValueChange={app.setShipToJBS} trackColor={{ true: colors.accent, false: colors.border }} thumbColor="#fff" testID="ship-to-jbs" />
             </View>
           </View>
-          
           <Dropdown
             placeholder="Select store"
-            options={app.stores.map((s) => ({
-              value: s.id, label: s.name, sublabel: `${s.address}`,
-            }))}
+            options={app.stores.map((s) => ({ value: s.id, label: s.name, sublabel: `${s.address}` }))}
             value={app.selectedStoreId}
             onChange={(id) => guardedChange('store', id)}
             testID="select-store"
@@ -476,173 +137,103 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-            {c('home.vendorLabel', 'SELECT VENDOR')}
-          </Text>
+          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{c('home.vendorLabel', 'SELECT VENDOR')}</Text>
           <Dropdown
             placeholder="Select vendor"
-            options={app.vendors.map((v) => ({
-              value: v.id, label: v.name, sublabel: `${v.salesPerson} · ${v.email}`,
-            }))}
+            options={app.vendors.map((v) => ({ value: v.id, label: v.name, sublabel: `${v.salesPerson} · ${v.email}` }))}
             value={app.selectedVendorId}
             onChange={(id) => guardedChange('vendor', id)}
             testID="select-vendor"
           />
-
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
             <Pressable
               onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
-              style={({ pressed }) => [
-                {
-                  paddingHorizontal: 14,
-                  paddingVertical: 6,
-                  borderRadius: 12,
-                  backgroundColor: colors.departmentToggle ?? colors.primary,
-                },
-                pressed && { opacity: 0.8 },
-              ]}
+              style={({ pressed }) => [{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12, backgroundColor: colors.departmentToggle ?? colors.primary }, pressed && { opacity: 0.8 }]}
               testID="department-toggle"
             >
-              <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold', fontSize: 12.5 * fs }}>
-                {app.department}
-              </Text>
+              <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold', fontSize: 12.5 * fs }}>{app.department}</Text>
             </Pressable>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-            {c('home.savedLabel', 'SAVED LIST')}
-          </Text>
+          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{c('home.savedLabel', 'SAVED LIST')}</Text>
           <Dropdown
             placeholder="Select saved order"
-            options={app.savedCarts
-              .filter((s) => s.userEmail === app.session?.email)
-              .map((s) => ({ value: s.id, label: s.name }))}
+            options={app.savedCarts.filter((s) => s.userEmail === app.session?.email).map((s) => ({ value: s.id, label: s.name }))}
             value={savedSelection}
             onChange={setSavedSelection}
-            onDeleteOption={(id) => {
-              app.deleteSavedCart(id);
-              if (savedSelection === id) setSavedSelection(null);
-            }}
+            onDeleteOption={(id) => { app.deleteSavedCart(id); if (savedSelection === id) setSavedSelection(null); }}
             testID="saved-list"
           />
         </View>
 
         <View style={styles.buttonGrid}>
-          <ActionButton
-            icon={<Feather name="send" size={22} color={colors.sendBtnText ?? colors.actionBtnIcon ?? '#fff'} />}
-            label={c('home.sendLabel', 'SEND')}
-            color={c('home.sendColor', colors.sendBtn ?? colors.accent)}
-            borderColor={colors.sendBtnBorder}
-            textColor={colors.sendBtnText ?? colors.actionBtnText}
-            onPress={handleSend}
-            testID="btn-send"
-          />
-          <ActionButton
-            icon={<MaterialCommunityIcons name="microsoft-excel" size={22} color={colors.actionBtnIcon ?? '#fff'} />}
-            label={c('home.exportLabel', 'EXPORT / IMPORT')}
-            color={c('home.exportColor', colors.exportBtn ?? colors.success)}
-            textColor={colors.actionBtnText}
-            onPress={handleExport}
-            testID="btn-export"
-          />
-          <ActionButton
-            icon={<Feather name="save" size={22} color={colors.actionBtnIcon ?? '#fff'} />}
-            label={c('home.saveLabel', 'SAVE')}
-            color={c('home.saveColor', colors.saveBtn ?? colors.primary)}
-            borderColor={colors.saveBtnBorder}
-            textColor={colors.actionBtnText}
-            onPress={handleSave}
-            testID="btn-save"
-          />
-          <ActionButton
-            icon={<Feather name="download" size={22} color={colors.actionBtnIcon ?? '#fff'} />}
-            label={c('home.loadLabel', 'ORDER LOAD')}
-            color={c('home.loadColor', colors.loadBtn ?? colors.accent)}
-            textColor={colors.actionBtnText}
-            onPress={handleLoad}
-            testID="btn-load"
-          />
+          <ActionButton icon={<Feather name="send" size={22} color={colors.sendBtnText ?? colors.actionBtnIcon ?? '#fff'} />} label={c('home.sendLabel', 'SEND')} color={c('home.sendColor', colors.sendBtn ?? colors.accent)} borderColor={colors.sendBtnBorder} textColor={colors.sendBtnText ?? colors.actionBtnText} onPress={handleSend} testID="btn-send" />
+          <ActionButton icon={<MaterialCommunityIcons name="microsoft-excel" size={22} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.exportLabel', 'EXPORT / IMPORT')} color={c('home.exportColor', colors.exportBtn ?? colors.success)} textColor={colors.actionBtnText} onPress={handleExportOptions} testID="btn-export" />
+          <ActionButton icon={<Feather name="save" size={22} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.saveLabel', 'SAVE')} color={c('home.saveColor', colors.saveBtn ?? colors.primary)} borderColor={colors.saveBtnBorder} textColor={colors.actionBtnText} onPress={handleSave} testID="btn-save" />
+          <ActionButton icon={<Feather name="download" size={22} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.loadLabel', 'ORDER LOAD')} color={c('home.loadColor', colors.loadBtn ?? colors.accent)} textColor={colors.actionBtnText} onPress={handleLoad} testID="btn-load" />
         </View>
       </ScrollView>
 
-      {/* Sending Overlay */}
-      <Modal visible={sending} transparent animationType="fade">
-        <View style={styles.sendingOverlay}>
-          <View style={[styles.sendingBox, { backgroundColor: colors.card }]}>
-            <ActivityIndicator size="large" color={colors.tint} />
-            <Text style={[styles.sendingTitle, { color: colors.text, fontSize: 18 * fs }]}>
-              Sending Order…
-            </Text>
-            <Text style={[styles.sendingSub, { color: colors.muted, fontSize: 14 * fs }]}>
-              Please wait. Do not close the app.
-            </Text>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Exporting Overlay */}
-      <Modal visible={exporting} transparent animationType="fade">
-        <View style={styles.sendingOverlay}>
-          <View style={[styles.sendingBox, { backgroundColor: colors.card }]}>
-            <ActivityIndicator size="large" color={colors.tint} />
-            <Text style={[styles.sendingTitle, { color: colors.text, fontSize: 18 * fs }]}>
-              Exporting To GOOGLE SHEET…
-            </Text>
-            <Text style={[styles.sendingSub, { color: colors.muted, fontSize: 14 * fs }]}>
-              Please wait. Do not close the app.
-            </Text>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Import Sheet Tabs Select Modal */}
-      <Modal visible={importModalVisible} transparent animationType="slide">
-        <View style={styles.sendingOverlay}>
-          <View style={[styles.modalBox, { backgroundColor: colors.card }]}>
-            <View style={styles.modalHeader}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Select Sheet Tab to Import</Text>
-              <Pressable onPress={() => setImportModalVisible(false)} style={{ padding: 4 }}>
-                <Feather name="x" size={20} color={colors.text} />
-              </Pressable>
-            </View>
-
-            {loadingTabs || importingTab ? (
-              <View style={{ paddingVertical: 30, alignItems: 'center', gap: 10 }}>
-                <ActivityIndicator size="large" color={colors.tint} />
-                <Text style={{ color: colors.muted }}>
-                  {importingTab ? 'Loading Tab Data…' : 'Fetching Sheet Tabs…'}
-                </Text>
-              </View>
-            ) : (
-              <ScrollView style={{ maxHeight: 300, marginVertical: 10 }}>
-                {tabList.length === 0 ? (
-                  <Text style={{ textAlign: 'center', color: colors.muted, marginVertical: 20 }}>
-                    No tabs found.
-                  </Text>
-                ) : (
-                  tabList.map((tab) => (
-                    <Pressable
-                      key={tab}
-                      style={({ pressed }) => [
-                        styles.tabItem,
-                        { borderColor: colors.border },
-                        pressed && { backgroundColor: colors.border },
-                      ]}
-                      onPress={() => handleSelectTab(tab)}
-                    >
-                      <Feather name="file-text" size={18} color={colors.tint} />
-                      <Text style={[styles.tabText, { color: colors.text }]}>{tab}</Text>
-                    </Pressable>
-                  ))
-                )}
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
+      {/* 분리된 모달 컴포넌트들 */}
+      <ProgressModal visible={sending} title="Sending Order…" subtitle="Please wait. Do not close the app." />
+      <ProgressModal visible={exporting} title="Exporting To GOOGLE SHEET…" subtitle="Please wait. Do not close the app." />
+      <ImportTabsModal visible={importModalVisible} onClose={closeImportModal} loadingTabs={loadingTabs} importingTab={importingTab} tabList={tabList} onSelectTab={handleSelectTab} />
     </View>
+  );
+}
+
+function ProgressModal({ visible, title, subtitle }: { visible: boolean; title: string; subtitle: string; }) {
+  const colors = useColors();
+  const fs = useFontScale();
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={styles.sendingOverlay}>
+        <View style={[styles.sendingBox, { backgroundColor: colors.card }]}>
+          <ActivityIndicator size="large" color={colors.tint} />
+          <Text style={[styles.sendingTitle, { color: colors.text, fontSize: 18 * fs }]}>{title}</Text>
+          <Text style={[styles.sendingSub, { color: colors.muted, fontSize: 14 * fs }]}>{subtitle}</Text>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function ImportTabsModal({ visible, onClose, loadingTabs, importingTab, tabList, onSelectTab }: { visible: boolean; onClose: () => void; loadingTabs: boolean; importingTab: boolean; tabList: string[]; onSelectTab: (t: string) => void; }) {
+  const colors = useColors();
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <View style={styles.sendingOverlay}>
+        <View style={[styles.modalBox, { backgroundColor: colors.card }]}>
+          <View style={styles.modalHeader}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Select Sheet Tab to Import</Text>
+            <Pressable onPress={onClose} style={{ padding: 4 }}>
+              <Feather name="x" size={20} color={colors.text} />
+            </Pressable>
+          </View>
+          {loadingTabs || importingTab ? (
+            <View style={{ paddingVertical: 30, alignItems: 'center', gap: 10 }}>
+              <ActivityIndicator size="large" color={colors.tint} />
+              <Text style={{ color: colors.muted }}>{importingTab ? 'Loading Tab Data…' : 'Fetching Sheet Tabs…'}</Text>
+            </View>
+          ) : (
+            <ScrollView style={{ maxHeight: 300, marginVertical: 10 }}>
+              {tabList.length === 0 ? (
+                <Text style={{ textAlign: 'center', color: colors.muted, marginVertical: 20 }}>No tabs found.</Text>
+              ) : (
+                tabList.map((tab) => (
+                  <Pressable key={tab} onPress={() => onSelectTab(tab)} style={({ pressed }) => [styles.tabItem, { borderColor: colors.border }, pressed && { backgroundColor: colors.border }]}>
+                    <Feather name="file-text" size={18} color={colors.tint} />
+                    <Text style={[styles.tabText, { color: colors.text }]}>{tab}</Text>
+                  </Pressable>
+                ))
+              )}
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -661,13 +252,8 @@ function ActionButton({
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.actionBtn,
-        { backgroundColor: color },
-        borderColor ? { borderWidth: StyleSheet.hairlineWidth, borderColor } : null,
-        pressed && { opacity: 0.8 },
-      ]}
       testID={testID}
+      style={({ pressed }) => [styles.actionBtn, { backgroundColor: color }, borderColor ? { borderWidth: StyleSheet.hairlineWidth, borderColor } : null, pressed && { opacity: 0.8 }]}
     >
       {icon}
       <Text style={[styles.actionLabel, { fontSize: 13 * fs }, textColor ? { color: textColor } : null]}>{label}</Text>
@@ -675,107 +261,269 @@ function ActionButton({
   );
 }
 
+function useHeaderGif() {
+  const [gifUri, setGifUri] = useState<string | null>(null);
+  const [gifAspectRatio, setGifAspectRatio] = useState<number | undefined>(undefined);
+  const [tapCount, setTapCount] = useState<number>(0);
+
+  useEffect(() => { AsyncStorage.getItem('header_custom_gif').then((uri) => { if (uri) setGifUri(uri); }); }, []);
+  useEffect(() => {
+    if (gifUri) Image.getSize(gifUri, (width, height) => { if (width && height) setGifAspectRatio(width / height); }, () => setGifAspectRatio(undefined));
+    else setGifAspectRatio(undefined);
+  }, [gifUri]);
+
+  const pickGif = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: false, quality: 1 });
+      if (!result.canceled && result.assets && result.assets[0]) {
+        setGifUri(result.assets[0].uri);
+        await AsyncStorage.setItem('header_custom_gif', result.assets[0].uri);
+      }
+    } catch (e) { notify('Error', 'GIF 이미지를 불러오는데 실패했습니다.'); }
+  };
+
+  const handleTotalPress = () => {
+    const nextCount = tapCount + 1;
+    if (nextCount >= 5) {
+      setTapCount(0);
+      if (gifUri) {
+        if (Platform.OS === 'web') {
+          if (window.confirm('GIF가 이미 등록되어 있습니다. 새로운 GIF를 선택하시겠습니까?\n(취소 누르면 기존 GIF 삭제)')) pickGif();
+          else { setGifUri(null); AsyncStorage.removeItem('header_custom_gif'); }
+        } else {
+          Alert.alert('GIF', 'IMAGE SELECTION', [
+            { text: 'NEW', onPress: pickGif },
+            { text: 'DELETE', style: 'destructive', onPress: async () => { setGifUri(null); await AsyncStorage.removeItem('header_custom_gif'); } },
+            { text: 'CANCEL', style: 'cancel' },
+          ]);
+        }
+      } else pickGif();
+    } else setTapCount(nextCount);
+  };
+  return { gifUri, gifAspectRatio, handleTotalPress };
+}
+
+function useAppVersion() {
+  const app = useApp();
+  const [checkingVersion, setCheckingVersion] = useState(false);
+  const handleCheckVersion = async () => {
+    if (checkingVersion) return;
+    const url = app.settings.appsScriptUrl?.trim();
+    if (!url) return notify('Notice', 'Apps Script URL is not set.');
+    setCheckingVersion(true);
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'checkUpdate', v: app.appVersion }) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      if (data && data.latestVersion) {
+        if (data.latestVersion > app.appVersion) {
+          const ok = await confirmAsync('Update Available', `Latest Version (${data.latestVersion})is available.\nDownload it now?`);
+          if (ok && data.downloadUrl) Linking.openURL(data.downloadUrl);
+        } else notify('Lastest Version Installed', 'App is up to date');
+      } else notify('No Updates', 'No APK available');
+    } catch (e: any) { notify('Server Error', `Response:\n${e?.message ?? ''}`); } 
+    finally { setCheckingVersion(false); }
+  };
+  return { checkingVersion, handleCheckVersion };
+}
+
+function useOrderAndCartManager() {
+  const app = useApp();
+  const [savedSelection, setSavedSelection] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  const store = app.stores.find((s) => s.id === app.selectedStoreId);
+  const vendor = app.vendors.find((v) => v.id === app.selectedVendorId);
+
+  const requireReady = () => {
+    if (!app.selectedStoreId) { notify('Notice', 'Select a store'); return false; }
+    if (!app.selectedVendorId) { notify('Notice', 'Select a vendor'); return false; }
+    if (app.cart.length === 0) { notify('Notice', 'Cart is empty'); return false; }
+    return true;
+  };
+
+  const handleSave = () => {
+    if (!requireReady()) return;
+    const saved = app.saveCart();
+    if (saved) notify('Saved', saved.name);
+  };
+
+  const handleLoad = () => {
+    if (!savedSelection) return notify('Notice', 'Select a saved order to load');
+    if (app.cart.length > 0) {
+      const saved = app.saveCart();
+      if (saved) notify('Auto-saved', `Current cart saved as:\n${saved.name}`);
+    }
+    app.loadCart(savedSelection);
+    setSavedSelection(null);
+    notify('Loaded', 'Saved order moved into cart');
+  };
+
+  const guardedChange = (kind: 'store' | 'vendor', id: string | null) => {
+    const current = kind === 'store' ? app.selectedStoreId : app.selectedVendorId;
+    const apply = () => { if (kind === 'store') app.setSelectedStoreId(id); else app.setSelectedVendorId(id); };
+    if (app.cart.length === 0 || id === current) return apply();
+
+    if (kind === 'vendor') {
+      const saved = app.saveCart();
+      if (saved) notify('Auto-saved', `Cart saved as:\n${saved.name}`); else app.clearCart();
+      return apply();
+    }
+    const doSave = () => { const saved = app.saveCart(); if (saved) notify('Cart saved', saved.name); apply(); };
+    const doChange = () => apply();
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('Cart has items.\n\nSave the cart before changing store?\n(Cancel = more options)')) doSave();
+      else if (window.confirm('Change store and keep the cart as is?\n(Cancel = keep current store)')) doChange();
+      return;
+    }
+    Alert.alert('Cart has items', 'What would you like to do?', [{ text: 'SAVE CART', onPress: doSave }, { text: 'CHANGE STORE', onPress: doChange }, { text: 'CANCEL', style: 'cancel' }]);
+  };
+
+  const handleSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    try { const res = await app.syncFromSheets(); if (!res.ok) notify('Sync failed', res.message); } 
+    finally { setSyncing(false); }
+  };
+
+  const buildOrderPayload = () => {
+    const items = app.cart.map((c) => {
+      const p = app.findByUpc(c.upc);
+      const originalItemCode = p?.itemCode ?? '';
+      const parts = originalItemCode.split('/');
+      const baseCode = parts[0].trim();
+      const defaultOpt = parts.length > 1 ? parts[1].trim() : '';
+      const activeOpt = c.opt || defaultOpt;
+      const finalItemCode = activeOpt ? `${baseCode} / ${activeOpt}` : baseCode;
+      const baseCost = p?.cost ?? 0;
+      const finalPrice = activeOpt ? calcPrice(baseCost, originalItemCode, c.opt) : baseCost;
+      return { upc: c.upc, itemCode: finalItemCode, description: p?.description ?? '', cost: finalPrice, qty: c.qty, amount: finalPrice * c.qty };
+    });
+    return {
+      v: app.appVersion, type: 'order', store: store?.name ?? '',
+      storeAddress: app.shipToJBS ? app.stores.find((s) => s.name.startsWith('JBS'))?.address ?? '' : store?.address ?? '',
+      shipToJBS: app.shipToJBS, department: app.department, vendor: vendor?.name ?? '', vendorEmail: vendor?.email ?? '', user: app.session?.email ?? '',
+      total: app.cartTotal, createdAt: new Date().toISOString(), jorderid: app.generateJOrderId(), items,
+    };
+  };
+
+  const handleSend = async () => {
+    if (!requireReady()) return;
+    const url = app.settings.appsScriptUrl.trim();
+    if (!url) return notify('Setup required', 'Register the Apps Script URL in the SETTING tab first.\nOrders cannot be sent until it is set.');
+    const ok = await confirmAsync('Send Order', `Send ${vendor?.name ?? ''} order?\nTotal $${app.cartTotal.toFixed(2)}\n\nThe order will be emailed to the vendor.`);
+    if (!ok) return;
+    setSending(true);
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(buildOrderPayload()) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      setSending(false);
+      if (data?.busy) return notify('Server busy', '서버에서 다른 일 처리 중에 있습니다.\n잠시 후에 다시 시도해 주세요.');
+      if (data?.ok === false) return notify('Send failed', `An error occurred while sending the order.\n${data.error ?? ''}`);
+      if (data && data.emailed === false) {
+        notify(
+          'Sent', // 타이틀은 상황에 맞게 유지 (필요시 'Sent'로 변경 가능)
+          `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`
+        );
+      } else {
+        notify(
+          'Sent', 
+          `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`
+        );
+      }
+      app.clearCart();
+    } catch (e: any) { setSending(false); notify('Send failed', `An error occurred while sending the order.\n${e?.message ?? ''}`); }
+  };
+
+  const executeExport = async (url: string) => {
+    if (!requireReady()) return;
+    const ok = await confirmAsync('Export', `Export ${vendor?.name ?? ''} order?`);
+    if (!ok) return;
+    setExporting(true);
+    try {
+      const payload = { ...buildOrderPayload(), action: 'export' };
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      setExporting(false);
+      if (data?.busy) return notify('Server busy', 'Server is processing another export.\nPlease try again shortly.');
+      if (data?.ok === false) return notify('Export failed', data.error ?? 'Unknown error');
+      notify('Export Complete', `${vendor?.name ?? ''} exported successfully.`);
+      app.clearCart();
+    } catch (e: any) { setExporting(false); notify('Export failed', e?.message ?? 'Unknown error'); }
+  };
+
+  return { guardedChange, savedSelection, setSavedSelection, handleSave, handleLoad, sending, exporting, syncing, handleSend, executeExport, handleSync };
+}
+
+function useImportActions() {
+  const app = useApp();
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [loadingTabs, setLoadingTabs] = useState(false);
+  const [tabList, setTabList] = useState<string[]>([]);
+  const [importingTab, setImportingTab] = useState(false);
+
+  const openImportModal = async () => {
+    setLoadingTabs(true); setImportModalVisible(true);
+    try {
+      if (app.getTabList) {
+        const res = await app.getTabList();
+        if (res.ok && res.tabs) setTabList(res.tabs);
+        else { notify('Failed', res.message || 'Failed to fetch sheet tabs'); setImportModalVisible(false); }
+      }
+    } catch (e: any) { notify('Failed', e?.message ?? 'Failed to connect server'); setImportModalVisible(false); } 
+    finally { setLoadingTabs(false); }
+  };
+
+  const handleSelectTab = async (tabName: string) => {
+    if (app.cart.length > 0) {
+      const saved = app.saveCart();
+      if (saved) notify('Auto-saved', `Current cart auto-saved as:\n${saved.name}`);
+    }
+    setImportingTab(true);
+    try {
+      if (app.importFromSheet) {
+        const res = await app.importFromSheet(tabName);
+        if (res.ok) { notify('Import Success', `Loaded sheet tab: ${tabName}`); setImportModalVisible(false); } 
+        else notify('Import Failed', res.message || 'Failed to import tab data');
+      }
+    } catch (e: any) { notify('Import Failed', e?.message ?? 'Failed to import tab data'); } 
+    finally { setImportingTab(false); }
+  };
+
+  return { importModalVisible, loadingTabs, importingTab, tabList, openImportModal, closeImportModal: () => setImportModalVisible(false), handleSelectTab };
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  sendingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendingBox: {
-    borderRadius: 16,
-    paddingVertical: 28,
-    paddingHorizontal: 36,
-    alignItems: 'center',
-    gap: 12,
-    minWidth: 240,
-  },
-  modalBox: {
-    width: '85%',
-    maxWidth: 400,
-    borderRadius: 16,
-    padding: 20,
-    elevation: 5,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  tabItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  sendingOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center' },
+  sendingBox: { borderRadius: 16, paddingVertical: 28, paddingHorizontal: 36, alignItems: 'center', gap: 12, minWidth: 240 },
+  modalBox: { width: '85%', maxWidth: 400, borderRadius: 16, padding: 20, elevation: 5 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  modalTitle: { fontSize: 16, fontWeight: '700' },
+  tabItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  tabText: { fontSize: 14, fontWeight: '500' },
   sendingTitle: { fontWeight: '700' },
   sendingSub: { textAlign: 'center' },
   scroll: { paddingHorizontal: 16, paddingBottom: 120 },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   brand: { fontFamily: 'Inter_700Bold', letterSpacing: 1.5 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   userEmail: { fontFamily: 'Inter_400Regular', marginTop: 2 },
   logoutBtn: { padding: 8 },
-  totalCard: {
-    borderRadius: 16,
-    padding: 20,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  totalLabel: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 12,
-    fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 2,
-  },
+  totalCard: { borderRadius: 16, padding: 20, alignItems: 'center', marginBottom: 20 },
+  totalLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontFamily: 'Inter_600SemiBold', letterSpacing: 2 },
   totalValue: { color: '#fff', fontFamily: 'Inter_700Bold', marginVertical: 4 },
   totalSub: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontFamily: 'Inter_400Regular' },
   section: { marginBottom: 16 },
-  sectionLabel: {
-    fontSize: 11,
-    fontFamily: 'Inter_700SemiBold',
-    letterSpacing: 1.2,
-    marginBottom: 6,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 10,
-    paddingHorizontal: 2,
-  },
+  sectionLabel: { fontSize: 11, fontFamily: 'Inter_700SemiBold', letterSpacing: 1.2, marginBottom: 6 },
+  toggleRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 2 },
   toggleLabel: { fontFamily: 'Inter_500Medium' },
-  buttonGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 4,
-  },
-  actionBtn: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    borderRadius: 12,
-    paddingVertical: 18,
-    alignItems: 'center',
-    gap: 6,
-  },
+  buttonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
+  actionBtn: { flexBasis: '48%', flexGrow: 1, borderRadius: 12, paddingVertical: 18, alignItems: 'center', gap: 6 },
   actionLabel: { color: '#fff', fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
 });
