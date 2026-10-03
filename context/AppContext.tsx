@@ -3,7 +3,7 @@ import { Alert } from 'react-native';
 //dsgsdgsdg
 
 
-const APP_BUILD_KEY = 'v1.3.002'
+const APP_BUILD_KEY = 'v1.03.003'
 
 import React, {
   createContext,
@@ -17,6 +17,7 @@ import React, {
 import { AppState as RNAppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Linking from 'expo-linking';
 
 export type Role = 'master' | 'admin' | 'staff';
@@ -251,6 +252,7 @@ const ICON_CHUNK = 40000;
 
 const STORAGE_KEY = 'multiorder_state_v1';
 const NONCE_KEY = 'multiorder_auth_nonce';
+const PRODUCTS_FILE_URI = FileSystem.documentDirectory + 'latest_products.json';
 
 // Designated admin account — always signs in as an active admin.
 const ADMIN_EMAIL = 'joonlim@jennybs.com';
@@ -380,6 +382,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           ) {
             saved.settings.appsScriptUrl = DEFAULT_APPS_SCRIPT_URL;
           }
+
+          // [Track 2] 로컬 파일 시스템에서 상품 카탈로그 읽어오기
+          try {
+            const fileInfo = await FileSystem.getInfoAsync(PRODUCTS_FILE_URI);
+            if (fileInfo.exists) {
+              const productsRaw = await FileSystem.readAsStringAsync(PRODUCTS_FILE_URI);
+              const parsedProducts = JSON.parse(productsRaw);
+              if (Array.isArray(parsedProducts) && parsedProducts.length > 0) {
+                saved.products = parsedProducts; // AsyncStorage 데이터 덮어쓰기
+              }
+            }
+          } catch (fileErr) {
+            console.warn('Failed to load products from file system', fileErr);
+          }
+
           setState((prev) => ({
             ...prev,
             ...saved,
@@ -387,6 +404,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             session: prev.session ?? saved.session ?? null,
             settings: { ...DEFAULT_SETTINGS, ...(saved.settings ?? {}) },
           }));
+        } else {
+          // AsyncStorage가 아예 없을 때(최초 설치 등) 파일 시스템 별도 확인 안전망
+          try {
+            const fileInfo = await FileSystem.getInfoAsync(PRODUCTS_FILE_URI);
+            if (fileInfo.exists) {
+              const productsRaw = await FileSystem.readAsStringAsync(PRODUCTS_FILE_URI);
+              const parsedProducts = JSON.parse(productsRaw);
+              if (Array.isArray(parsedProducts) && parsedProducts.length > 0) {
+                setState((prev) => ({ ...prev, products: parsedProducts }));
+              }
+            }
+          } catch (e) {}
         }
       } catch {
         // start fresh on parse failure
@@ -978,12 +1007,20 @@ const specialVendors = ['7 DOLLAR']; // 향후 추가 벤더 확장 자리 (OR �
       // search is always scoped to the vendor selected on HOME
       if (!state.selectedVendorId) return [];
       const pool = state.products.filter((p) => p.vendorId === state.selectedVendorId);
-      return pool.filter(
-        (p) =>
-          p.description.toUpperCase().includes(q) ||
-          p.itemCode.toUpperCase().includes(q) ||
-          p.upc.includes(q),
-      );
+      
+      // 000을 기준으로 배열로 분리 (입력된 공백은 그대로 유지됨)
+      const terms = q.split(',,');
+
+      return pool.filter((p) => {
+        const desc = p.description.toUpperCase();
+        const code = p.itemCode.toUpperCase();
+        const upc = p.upc;
+
+        // 분리된 모든 조각(AND 조건)이 셋 중 하나에는 반드시 포함되어야 함
+        return terms.every((term) => 
+          desc.includes(term) || code.includes(term) || upc.includes(term)
+        );
+      });
     },
     [state.products, state.selectedVendorId],
   );
@@ -1341,7 +1378,7 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
       const data = await res.json();
       
       if (data.error === 'UPDATE_REQUIRED') {
-        Alert.alert('Update Required 업데이트 필요', data.message || 'Please update to the latest version');
+        Alert.alert('Update Required 업데이트 필요', `${data.message || 'Please update to the latest version'}\n\nTap JENNY on the top left to update.`);
         return { ok: false, message: data.message };
       }
       const updates: Partial<AppState> = { lastSyncAt: new Date().toISOString() };
@@ -1446,7 +1483,14 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
           ...(emailSynced && data.emailTemplate.body ? { emailBody: String(data.emailTemplate.body) } : {}),
         },
       }));
-      if (updates.products) fullSyncCountRef.current += 1; // 상품 전체가 갱신됨
+      
+      if (updates.products) {
+        fullSyncCountRef.current += 1; // 상품 전체가 갱신됨
+        // [Track 2] 백그라운드로 로컬 파일 시스템에 상품 전체 저장
+        FileSystem.writeAsStringAsync(PRODUCTS_FILE_URI, JSON.stringify(updates.products)).catch((err) =>
+          console.warn('Failed to write products to file system', err)
+        );
+      }
       const counts = [
         updates.stores ? `${updates.stores.length} stores` : null,
         updates.vendors ? `${updates.vendors.length} vendors` : null,
@@ -1483,7 +1527,7 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
         const data = await res.json();
         
         if (data.error === 'UPDATE_REQUIRED') {
-          Alert.alert('Update Required 업데이트 필요', data.message || 'Please update to the latest version');
+          Alert.alert('Update Required 업데이트 필요', `${data.message || 'Please update to the latest version'}\n\nTap JENNY on the top left to update.`);
           return { ok: false, message: data.message };
         }
         // 강제 로그아웃 신호는 벤더 단건 동기화에서도 동일하게 처리
@@ -1512,11 +1556,22 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
           .filter((p: Product) => p.upc);
         // 빈 결과면 기존 캐시 유지 (탭 이름 불일치 등으로 캐시를 날리지 않도록)
         if (fresh.length === 0) return { ok: false, message: 'No products for this vendor' };
-        setState((prev) => ({
-          ...prev,
-          products: [...prev.products.filter((p) => p.vendorId !== vendorId), ...fresh],
-          lastSyncAt: new Date().toISOString(),
-        }));
+        
+        setState((prev) => {
+          const nextProducts = [...prev.products.filter((p) => p.vendorId !== vendorId), ...fresh];
+          
+          // [Track 2] 백그라운드로 로컬 파일 시스템에 변경된 상품 목록 덮어쓰기
+          FileSystem.writeAsStringAsync(PRODUCTS_FILE_URI, JSON.stringify(nextProducts)).catch((err) =>
+            console.warn('Failed to write vendor products to file system', err)
+          );
+
+          return {
+            ...prev,
+            products: nextProducts,
+            lastSyncAt: new Date().toISOString(),
+          };
+        });
+        
         return { ok: true, message: `Synced ${fresh.length} products (${vendor.name})` };
       } catch (e: any) {
         return { ok: false, message: e?.message ?? 'Sync failed' };
