@@ -1,4 +1,4 @@
-// 최종 수정: 2026-09-27 12:38 PM(CT) 배포   //update link
+// 최종 수정: 2026-10-04 09:22 AM(CT) 배포   //7 DOLLAR AUTOMATION
 var SS = SpreadsheetApp.getActiveSpreadsheet();
 function doGet(e) {
   
@@ -534,8 +534,8 @@ function recordOrderLocked_(body, email, startTime) { // startTime 파라미터 
 
 function recordOrderInner_(sh, body, startTime) { // startTime 파라미터
 
-  // B1(부서 이미지)도 초기화 대상에 포함하여 작업 탭을 깔끔하게 정리
-  sh.getRangeList(['B1', 'B4', 'D4', 'G1', 'G2', 'G3', 'G5', 'B10:F5000']).clearContent();
+  // B1(부서 이미지)도 초기화 대상에 포함하여 작업 탭을 깔끔하게 정리 (E6 추가)
+  sh.getRangeList(['B1', 'B4', 'D4', 'E6', 'G1', 'G2', 'G3', 'G5', 'B10:F5000']).clearContent();
 
   // 1) 부서별 로고 이미지를 B1 셀에 수식으로 삽입 (PDF 생성 및 템플릿 작업용)
   var deptKey = String(body.department || 'PRODUCT').trim().toUpperCase();
@@ -547,6 +547,7 @@ function recordOrderInner_(sh, body, startTime) { // startTime 파라미터
   // 2) 나머지 주문 정보 입력
   sh.getRange('B4').setValue(body.store || '');
   sh.getRange('D4').setValue(body.shipToJBS ? 'JBS' : (body.store || ''));
+  sh.getRange('E6').setValue(body.me2ve || ''); // me2ve 메시지 기록
   sh.getRange('G1').setValue(body.vendor || '');
   sh.getRange('G2').setValue(new Date());
   sh.getRange('G3').setValue(String(body.user || '').trim()); // 발주자 이메일 기록
@@ -595,11 +596,6 @@ function recordOrderInner_(sh, body, startTime) { // startTime 파라미터
     logOrderToExternalSheet_(body, savedPdfUrl);
   } catch (logErr) {
     throw new Error('[EXTERNAL_LOG] ' + logErr);
-  }
-  try {
-    saveFilesToUserFolder_(pdf, body.department);
-  } catch (saveErr) {
-    throw new Error('[FILE_SAVE] ' + saveErr);
   }
 
   // 4) 벤더 이메일 발송 (제목 = EMAIL 탭 B1, 본문 = EMAIL 탭 B2)
@@ -742,18 +738,30 @@ function backupOrderTab_(sh, tabName, department) {
   });
   copied.getRange(1, 1, lastRow, numCols).setValues(vals);
 
-  // 이미지 박제
   copied.getRange("B1").setFormula('=IMAGE("' + imageUrl + '")');
 
-  // 시트 주소 박기
   copied.getRange("G4").setFormula('=IFERROR(GET_FULL_URL(),"")');
   
-  // 아래 셀에 메세지 입력 유도
   copied.getRange("E5").setFormula('IF(G1="7 DOLLAR","메시지 아래 입력","")');
 
   // 데이터 아래 남은 깨진 수식(#REF!) 정리
   var maxR = copied.getMaxRows();
   if (maxR > lastRow) copied.getRange(lastRow + 1, 1, maxR - lastRow, numCols).clearContent();
+
+  var vendorVal = String(sh.getRange('G1').getValue() || '').trim().toUpperCase();
+  if (vendorVal === '7 DOLLAR') {
+    try {
+      var fileObj = DriveApp.getFileById(config.orderFileId);
+      var parentFolders = fileObj.getParents();
+      if (parentFolders.hasNext()) {
+        var folder = parentFolders.next();
+        var g4Val = String(sh.getRange('G4').getValue() || '');
+        folder.createFile(tabName + '.txt', g4Val, MimeType.PLAIN_TEXT);
+      }
+    } catch (txtErr) {
+      console.error('Failed to create 7 DOLLAR text file: ' + txtErr);
+    }
+  }
 }
 
 // 외부 스프레드시트 월별 탭에 발주 내역 기록

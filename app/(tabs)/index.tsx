@@ -10,8 +10,12 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
   Linking,
+  KeyboardAvoidingView,
+  Keyboard, 
+  TouchableWithoutFeedback,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -50,7 +54,8 @@ export default function HomeScreen() {
   const { checkingVersion, handleCheckVersion } = useAppVersion();
   const { 
     guardedChange, savedSelection, setSavedSelection, handleSave, handleLoad,
-    sending, exporting, syncing, handleSend, executeExport, handleSync 
+    sending, exporting, syncing, handleSend, executeExport, handleSync,
+    sendModalVisible, setSendModalVisible, me2ve, setMe2ve, confirmSend
   } = useOrderAndCartManager();
   const { 
     importModalVisible, loadingTabs, importingTab, tabList, 
@@ -180,6 +185,14 @@ export default function HomeScreen() {
       <ProgressModal visible={sending} title="Sending Order…" subtitle="Please wait. Do not close the app." />
       <ProgressModal visible={exporting} title="Exporting To GOOGLE SHEET…" subtitle="Please wait. Do not close the app." />
       <ImportTabsModal visible={importModalVisible} onClose={closeImportModal} loadingTabs={loadingTabs} importingTab={importingTab} tabList={tabList} onSelectTab={handleSelectTab} />
+      
+      <SendConfirmModal 
+        visible={sendModalVisible} 
+        onClose={() => setSendModalVisible(false)} 
+        onConfirm={confirmSend}
+        me2ve={me2ve}
+        setMe2ve={setMe2ve}
+      />
     </View>
   );
 }
@@ -333,6 +346,8 @@ function useOrderAndCartManager() {
   const [sending, setSending] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [sendModalVisible, setSendModalVisible] = useState(false);
+  const [me2ve, setMe2ve] = useState('');
 
   const store = app.stores.find((s) => s.id === app.selectedStoreId);
   const vendor = app.vendors.find((v) => v.id === app.selectedVendorId);
@@ -389,7 +404,7 @@ function useOrderAndCartManager() {
     finally { setSyncing(false); }
   };
 
-  const buildOrderPayload = () => {
+  const buildOrderPayload = (msg: string = '') => {
     const items = app.cart.map((c) => {
       const p = app.findByUpc(c.upc);
       const originalItemCode = p?.itemCode ?? '';
@@ -406,34 +421,33 @@ function useOrderAndCartManager() {
       v: app.appVersion, type: 'order', store: store?.name ?? '',
       storeAddress: app.shipToJBS ? app.stores.find((s) => s.name.startsWith('JBS'))?.address ?? '' : store?.address ?? '',
       shipToJBS: app.shipToJBS, department: app.department, vendor: vendor?.name ?? '', vendorEmail: vendor?.email ?? '', user: app.session?.email ?? '',
-      total: app.cartTotal, createdAt: new Date().toISOString(), jorderid: app.generateJOrderId(), items,
+      total: app.cartTotal, createdAt: new Date().toISOString(), jorderid: app.generateJOrderId(), items, me2ve: msg,
     };
   };
 
-  const handleSend = async () => {
+  const handleSend = () => {
     if (!requireReady()) return;
     const url = app.settings.appsScriptUrl.trim();
     if (!url) return notify('Setup required', 'Register the Apps Script URL in the SETTING tab first.\nOrders cannot be sent until it is set.');
-    const ok = await confirmAsync('Send Order', `Send ${vendor?.name ?? ''} order?\nTotal $${app.cartTotal.toFixed(2)}\n\nThe order will be emailed to the vendor.`);
-    if (!ok) return;
+    setMe2ve(''); // 모달을 열기 전 입력값 초기화
+    setSendModalVisible(true);
+  };
+
+  const confirmSend = async () => {
+    setSendModalVisible(false);
+    const url = app.settings.appsScriptUrl.trim();
     setSending(true);
     try {
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(buildOrderPayload()) });
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(buildOrderPayload(me2ve)) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json().catch(() => ({}));
       setSending(false);
       if (data?.busy) return notify('Server busy', '서버에서 다른 일 처리 중에 있습니다.\n잠시 후에 다시 시도해 주세요.');
       if (data?.ok === false) return notify('Send failed', `An error occurred while sending the order.\n${data.error ?? ''}`);
       if (data && data.emailed === false) {
-        notify(
-          'Sent', // 타이틀은 상황에 맞게 유지 (필요시 'Sent'로 변경 가능)
-          `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`
-        );
+        notify('Sent', `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`);
       } else {
-        notify(
-          'Sent', 
-          `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`
-        );
+        notify('Sent', `${vendor?.name}, Total $${app.cartTotal.toFixed(2)}\n${data.emailNote || ''}`);
       }
       app.clearCart();
     } catch (e: any) { setSending(false); notify('Send failed', `An error occurred while sending the order.\n${e?.message ?? ''}`); }
@@ -457,7 +471,7 @@ function useOrderAndCartManager() {
     } catch (e: any) { setExporting(false); notify('Export failed', e?.message ?? 'Unknown error'); }
   };
 
-  return { guardedChange, savedSelection, setSavedSelection, handleSave, handleLoad, sending, exporting, syncing, handleSend, executeExport, handleSync };
+  return { guardedChange, savedSelection, setSavedSelection, handleSave, handleLoad, sending, exporting, syncing, handleSend, executeExport, handleSync, sendModalVisible, setSendModalVisible, me2ve, setMe2ve, confirmSend };
 }
 
 function useImportActions() {
@@ -527,3 +541,79 @@ const styles = StyleSheet.create({
   actionBtn: { flexBasis: '48%', flexGrow: 1, borderRadius: 12, paddingVertical: 18, alignItems: 'center', gap: 6 },
   actionLabel: { color: '#fff', fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
 });
+
+function SendConfirmModal({
+  visible, onClose, onConfirm, me2ve, setMe2ve
+}: {
+  visible: boolean; onClose: () => void; onConfirm: () => void; me2ve: string; setMe2ve: (t: string) => void;
+}) {
+  const colors = useColors();
+  const fs = useFontScale();
+  const app = useApp();
+  const vendor = app.vendors.find((v) => v.id === app.selectedVendorId);
+
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      {/* 1. 최상단을 KeyboardAvoidingView로 감싸고 꽉 찬 화면(flex: 1) 부여 */}
+      <KeyboardAvoidingView 
+        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' }} 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        {/* 2. ScrollView로 래핑하여 키보드 활성화 시 컨텐츠가 위로 밀릴 수 있도록 설정 */}
+        <ScrollView
+          style={{ flex: 1, width: '100%' }}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 16 }}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* 3. 빈 화면 터치 시 키보드를 닫기 위한 TouchableWithoutFeedback */}
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' }}>
+              
+              {/* 모달 내부(입력창 및 버튼 영역) 터치 시 이벤트 전파를 막아 키보드가 닫히지 않도록 빈 래퍼 추가 */}
+              <TouchableWithoutFeedback>
+                <View style={[styles.modalBox, { backgroundColor: colors.card, minWidth: 280, width: '100%' }]}>
+                  <Text style={[styles.modalTitle, { color: colors.text, marginBottom: 10, textAlign: 'center' }]}>
+                    Send Order
+                  </Text>
+                  <Text style={{ color: colors.text, fontSize: 14 * fs, textAlign: 'center', marginBottom: 20 }}>
+                    Send {vendor?.name ?? ''} order?{'\n'}Total ${app.cartTotal.toFixed(2)}
+                  </Text>
+                  
+                  <Text style={{ color: colors.mutedForeground, fontSize: 11 * fs, fontWeight: '700', marginBottom: 6, letterSpacing: 1 }}>
+                    [MESSAGE]
+                  </Text>
+                  <TextInput
+                    style={{
+                      borderWidth: StyleSheet.hairlineWidth,
+                      borderColor: colors.border,
+                      borderRadius: 8,
+                      padding: 12,
+                      color: colors.text,
+                      minHeight: 44,
+                      marginBottom: 24,
+                      backgroundColor: colors.background
+                    }}
+                    placeholder="Optional message to vendor..."
+                    placeholderTextColor={colors.muted}
+                    value={me2ve}
+                    onChangeText={setMe2ve}
+                  />
+
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <Pressable onPress={onClose} style={({ pressed }) => [{ flex: 1, paddingVertical: 14, borderRadius: 8, backgroundColor: colors.border, alignItems: 'center' }, pressed && { opacity: 0.8 }]}>
+                      <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 * fs }}>CANCEL</Text>
+                    </Pressable>
+                    <Pressable onPress={onConfirm} style={({ pressed }) => [{ flex: 1, paddingVertical: 14, borderRadius: 8, backgroundColor: colors.primary, alignItems: 'center' }, pressed && { opacity: 0.8 }]}>
+                      <Text style={{ color: '#fff', fontWeight: '600', fontSize: 13 * fs }}>SEND</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+              
+            </View>
+          </TouchableWithoutFeedback>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}

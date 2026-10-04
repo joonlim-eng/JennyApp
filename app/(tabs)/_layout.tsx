@@ -27,7 +27,7 @@ function NativeTabLayout({ isAdmin }: { isAdmin: boolean }) {
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings" hidden={!isAdmin}>
         <Icon sf={{ default: 'gearshape', selected: 'gearshape.fill' }} />
-        <Label>SETTING</Label>
+        <Label>SETTINGS</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -111,7 +111,7 @@ function ClassicTabLayout({ isAdmin }: { isAdmin: boolean }) {
         name="settings"
         options={{
           href: isAdmin ? undefined : null,
-          title: 'SETTING',
+          title: 'SETTINGS',
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="gearshape" tintColor={color} size={24} />

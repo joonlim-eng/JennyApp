@@ -68,7 +68,7 @@ export default function SettingsScreen() {
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets={true}
       >
-        <Text style={[styles.title, { color: colors.primary }]}>SETTING</Text>
+        <Text style={[styles.title, { color: colors.primary }]}>SETTINGS</Text>
 
         <SectionHeader label="Users" icon="users" open={open === 'users'} onPress={() => toggle('users')} />
         {open === 'users' && <UsersSection />}
@@ -519,7 +519,9 @@ function SubHeader({ label, open, onPress }: { label: string; open: boolean; onP
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: colors.muted,
+        backgroundColor: colors.card, 
+        borderColor: colors.border,
+        borderWidth: 1,
         borderRadius: 8,
         paddingVertical: 10,
         paddingHorizontal: 12,
@@ -527,7 +529,7 @@ function SubHeader({ label, open, onPress }: { label: string; open: boolean; onP
         marginTop: 2,
       }}
     >
-      <Text style={{ color: colors.foreground, fontFamily: 'Inter_600SemiBold', fontSize: 13 }}>{label}</Text>
+      <Text style={{ color: '#0000', fontFamily: 'Inter_600SemiBold', fontSize: 13 }}>{label}</Text>
       <Feather name={open ? 'chevron-up' : 'chevron-down'} size={16} color={colors.mutedForeground} />
     </Pressable>
   );
