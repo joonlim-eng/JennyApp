@@ -1,9 +1,16 @@
-import { Alert } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Pressable,
+  Text,
+  View,
+} from 'react-native';
 
 //dsgsdgsdg
 
 
-const APP_BUILD_KEY = 'v1.03.003'
+export const APP_BUILD_KEY = 'v1.04.1017'
 
 import React, {
   createContext,
@@ -21,6 +28,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Linking from 'expo-linking';
 
 export type Role = 'master' | 'admin' | 'staff';
+
+export interface PurchaseAccess {
+  email: string;
+  departments: ('GM' | 'PRODUCT')[];
+  stores: string[];
+}
 
 /** 시트의 LEVEL 값(master/administrator/user 등)을 앱 Role로 정규화 */
 export function toRole(v: unknown): Role {
@@ -68,9 +81,17 @@ export interface Product {
   upc: string;
   itemCode: string;
   description: string;
-  cost: number;
+  cost: string | number;
   vendorId: string;
   imageUrl?: string;
+}
+
+function isSevenDollarVendor(vendorId: string): boolean {
+  return vendorId.replace(/[^a-z0-9]/gi, '').toUpperCase() === '7DOLLAR';
+}
+
+function sevenDollarSku(itemCode: string): string {
+  return itemCode.split('/')[0].trim().toUpperCase();
 }
 
 export interface CartItem {
@@ -82,27 +103,39 @@ export interface CartItem {
 
 // 7 Dollar Unit Price
 export function parseItemOptions(itemCode: string) {
-  const parts = itemCode.split('/');
-  if (parts.length < 2) return { baseCode: itemCode.trim(), options: [] };
+  const parts = String(itemCode || '').split('/');
+  if (parts.length < 2) return { baseCode: String(itemCode || '').trim(), options: [] };
   const baseCode = parts[0].trim();
   const options = parts.slice(1).map((p) => p.trim()).filter(Boolean);
   return { baseCode, options };
 }
 
-export function getMultiplier(option: string) {
-  const match = option.match(/\((\d+)\)/);
-  return match ? parseInt(match[1], 10) : 1; // 괄호가 없으면(예: Each) 1로 처리
+// 단위와 가격을 1:1 객체 쌍 배열로 결합
+export function getItemOptionPairs(cost: string | number, itemCode: string) {
+  const { options } = parseItemOptions(itemCode);
+  const costParts = String(cost ?? '0').split('/').map((s) => {
+    const num = parseFloat(s.replace(/[^0-9.]/g, ''));
+    return isNaN(num) ? 0 : num;
+  });
+
+  if (options.length === 0) {
+    return [{ opt: '', cleanOpt: '', price: costParts[0] || 0 }];
+  }
+
+  return options.map((opt, idx) => ({
+    opt,
+    cleanOpt: opt.trim().toUpperCase(),
+    price: costParts[idx] !== undefined ? costParts[idx] : (costParts[0] || 0),
+  }));
 }
 
-export function calcPrice(cost: number, itemCode: string, selectedOpt?: string) {
-  const { options } = parseItemOptions(itemCode);
-  if (options.length === 0) return cost; // 슬래시가 없는 일반 상품
-  
-  const baseMult = getMultiplier(options[0]); // 첫 번째 옵션의 괄호 안 숫자
-  const unitPrice = cost / baseMult;          // 낱개 단가
-  const targetMult = selectedOpt ? getMultiplier(selectedOpt) : baseMult;
-  
-  return unitPrice * targetMult; // 최종 가격
+export function calcPrice(cost: string | number, itemCode: string, selectedOpt?: string) {
+  const pairs = getItemOptionPairs(cost, itemCode);
+  if (!selectedOpt) return pairs[0].price;
+
+  const clean = selectedOpt.trim().toUpperCase();
+  const matched = pairs.find((p) => p.cleanOpt === clean);
+  return matched ? matched.price : pairs[0].price;
 }
 // 7Dollar Unit
 
@@ -144,7 +177,7 @@ export interface Settings {
 
 interface AppState {
   isHapticDisabled: boolean;
-  session: { email: string; role: Role } | null;
+  session: { email: string; role: Role; purchaseToken?: string } | null;
   users: AppUser[];
   stores: Store[];
   vendors: Vendor[];
@@ -197,19 +230,13 @@ import { SEED_STORES, SEED_VENDORS, SEED_PRODUCTS, SEED_VERSION } from '@/data/s
 
 // current Apps Script deployment — baked in so Google sign-in works before any setup
 const DEFAULT_APPS_SCRIPT_URL =
-  'https://script.google.com/macros/s/AKfycbycb8Z6OCyBVSnM1Kg7mvQIKIJmFNo0ZqP_qKYTBSgBbaBLRQKDcNqYhcyXQqkHiS9XeA/exec';
-
-// older deployments that no longer work — auto-replace with the current URL
-const DEAD_URL_MARKERS = [
-  'AKfycbyxURgMorSUHWwhqd134yvq1COopv7hk',
-  'AKfycbyhdL5IqRBfaiw53weXABHW6YojOq8zloE2Kie',
-];
+  'https://script.google.com/macros/s/AKfycbxrPhP-NILWUUgkH642jC6ZSIn9kj1fYTZNYg93fBXE24i25MCuAmIqp10QQCc-7FUXqw/exec';
 
 const DEFAULT_SETTINGS: Settings = {
   appsScriptUrl: DEFAULT_APPS_SCRIPT_URL,
   emailTitle: 'Purchase Order',
   emailBody: 'Please find our order details below. Thank you.',
-  fontScale: 'medium',
+  fontScale: 'small',
   syncMode: 'all',
   appTitle: 'JENNY',
   theme: 'slate',
@@ -258,6 +285,8 @@ const PRODUCTS_FILE_URI = FileSystem.documentDirectory + 'latest_products.json';
 const ADMIN_EMAIL = 'joonlim@jennybs.com';
 
 interface AppContextValue extends AppState {
+  purchaseAccess: PurchaseAccess | null;
+  refreshPurchaseAccess: () => void;
   toggleHaptic: () => void;
   appVersion: string;
   loading: boolean;
@@ -290,6 +319,7 @@ interface AppContextValue extends AppState {
   findAllByUpc: (upc: string) => Product[];
   findByUpc: (upc: string) => Product | undefined;
   searchProducts: (kw: string) => Product[];
+  isProductOutOfStock: (product: Product) => boolean;
   // saved carts
   saveCart: () => SavedCart | null;
   loadCart: (id: string) => void;
@@ -336,6 +366,127 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     seedVersion: SEED_VERSION,
   });
   const [loading, setLoading] = useState(true);
+  // PURCHASE permissions are verified by the server; never persist them locally.
+  const [purchaseAccessState, setPurchaseAccessState] = useState<{
+    sessionKey: string;
+    access: PurchaseAccess;
+  } | null>(null);
+  const [purchaseAccessRefreshKey, setPurchaseAccessRefreshKey] = useState(0);
+  const purchaseEmail = state.session?.email?.trim().toLowerCase() ?? '';
+  const purchaseRole = state.session?.role;
+  const purchaseToken = state.session?.purchaseToken ?? '';
+  const purchaseScriptUrl = state.settings.appsScriptUrl.trim();
+
+  // Bind each authorization response to this exact login session and role.
+  // A stale permission from a previous login can never enable the PURCHASE tab.
+  const purchaseSessionKey = JSON.stringify([
+    purchaseEmail, purchaseRole, purchaseToken, purchaseScriptUrl,
+  ]);
+  const purchaseAccess = useMemo<PurchaseAccess | null>(() => {
+  if (purchaseRole === 'master' && purchaseEmail) {
+    return {
+      email: purchaseEmail,
+      departments: ['GM', 'PRODUCT'],
+      stores: ['ALL'],
+    };
+  }
+  return purchaseAccessState?.sessionKey === purchaseSessionKey
+    ? purchaseAccessState.access
+    : null;
+}, [
+  purchaseRole,
+  purchaseEmail,
+  purchaseAccessState,
+  purchaseSessionKey,
+]);
+
+  const refreshPurchaseAccess = useCallback(() => {
+    setPurchaseAccessRefreshKey((k) => k + 1);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    setPurchaseAccessState(null);
+
+    // STAFF, missing login tokens, and blank settings can never obtain access.
+    if (loading || !purchaseEmail || !purchaseToken || !purchaseScriptUrl ||
+        (purchaseRole !== 'master' && purchaseRole !== 'admin')) {
+      return () => { active = false; };
+    }
+
+    const fetchPurchaseAccess = async () => {
+      try {
+        const params = [
+          'action=purchaseAccess',
+          `token=${encodeURIComponent(purchaseToken)}`,
+          `v=${encodeURIComponent(APP_BUILD_KEY)}`,
+        ].join('&');
+        const url = `${purchaseScriptUrl}${purchaseScriptUrl.includes('?') ? '&' : '?'}${params}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+
+        // Fail closed: only accept a complete, explicitly granted server ACL.
+        if (json?.ok !== true || json.allowed !== true ||
+            !Array.isArray(json.departments) || !Array.isArray(json.stores) ||
+            json.departments.length === 0 || json.stores.length === 0) return;
+
+        const departments: ('GM' | 'PRODUCT')[] = [];
+        for (const raw of json.departments as unknown[]) {
+          if (typeof raw !== 'string') return;
+          const department = raw.trim().toUpperCase();
+          if (department !== 'GM' && department !== 'PRODUCT') return;
+          if (!departments.includes(department)) departments.push(department);
+        }
+
+        const stores: string[] = [];
+        for (const raw of json.stores as unknown[]) {
+          if (typeof raw !== 'string') return;
+          const store = raw.trim().toUpperCase();
+          if (!store || store.includes(',')) return;
+          if (!stores.includes(store)) stores.push(store);
+        }
+        if (!departments.length || !stores.length ||
+            (stores.includes('ALL') && stores.length !== 1)) return;
+
+        if (active) {
+          setPurchaseAccessState({
+            sessionKey: purchaseSessionKey,
+            access: { email: purchaseEmail, departments, stores },
+          });
+        }
+      } catch {
+        // Server/network/invalid JSON errors must not reveal PURCHASE.
+      }
+    };
+    void fetchPurchaseAccess();
+    return () => { active = false; };
+  }, [loading, purchaseEmail, purchaseRole, purchaseToken,
+      purchaseScriptUrl, purchaseSessionKey, purchaseAccessRefreshKey]);
+
+  // Recheck G/H after returning to the foreground (including web focus).
+  useEffect(() => {
+    if (loading) return;
+    const sub = RNAppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') refreshPurchaseAccess();
+    });
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const onFocus = () => refreshPurchaseAccess();
+      const onVisibility = () => {
+        if (document.visibilityState === 'visible') refreshPurchaseAccess();
+      };
+      window.addEventListener('focus', onFocus);
+      document.addEventListener('visibilitychange', onVisibility);
+      return () => {
+        sub.remove();
+        window.removeEventListener('focus', onFocus);
+        document.removeEventListener('visibilitychange', onVisibility);
+      };
+    }
+    return () => sub.remove();
+  }, [loading, refreshPurchaseAccess]);
+
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
 
   const itemOptionOf = useCallback((upc: string) => {
@@ -372,13 +523,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           (saved as any).seedVersion = SEED_VERSION;
           // scan list is session-only: always start SCAN empty on app launch
           saved.scanList = [];
-          // migration: empty or dead old deployment URL — force the current one
+          // migration: restore the verified production deployment URL.
+          // Preserve all other saved settings and local app data.
           if (
             saved.settings &&
-            (!saved.settings.appsScriptUrl ||
-              DEAD_URL_MARKERS.some(function (m) {
-                return String(saved.settings?.appsScriptUrl || '').includes(m);
-              }))
+            String(saved.settings.appsScriptUrl || '').trim() !== DEFAULT_APPS_SCRIPT_URL
           ) {
             saved.settings.appsScriptUrl = DEFAULT_APPS_SCRIPT_URL;
           }
@@ -444,6 +593,222 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const stateRef = useRef(state);
   stateRef.current = state;
 
+  // 전체 상품 응답 대신 OOS SKU와 마지막 성공 날짜만 저장한다.
+  const SEVEN_DOLLAR_OOS_STORAGE_KEY = 'multiorder_7d_oos_v1';
+
+  const [sevenDollarOosSkus, setSevenDollarOosSkus] = useState<Set<string>>(() => new Set());
+  const sevenDollarOosRef = useRef<Set<string>>(new Set());
+  const sevenDollarOosSuccessDateRef = useRef<string | null>(null);
+
+  const [sevenDollarOosStatus, setSevenDollarOosStatus] = useState<
+    'checking' | 'syncing' | 'failed' | 'ready'
+  >('checking');
+
+  // 벤더 재선택 및 RETRY마다 한 번의 확인/동기화를 시작한다.
+  const [sevenDollarOosAttempt, setSevenDollarOosAttempt] = useState(0);
+  const sevenDollarOosLockedRef = useRef(true);
+
+  const localDateKey = () => {
+    const now = new Date();
+    return [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0'),
+    ].join('-');
+  };
+
+  const isSevenDollarWorkLocked = useCallback(() => {
+    const vendorId = stateRef.current.selectedVendorId;
+    return Boolean(
+      vendorId &&
+      isSevenDollarVendor(vendorId) &&
+      sevenDollarOosLockedRef.current,
+    );
+  }, []);
+
+  const isProductOutOfStock = useCallback(
+    (product: Product): boolean =>
+      isSevenDollarVendor(product.vendorId) &&
+      sevenDollarOosSkus.has(sevenDollarSku(product.itemCode)),
+    [sevenDollarOosSkus],
+  );
+
+  const retrySevenDollarOos = useCallback(() => {
+    sevenDollarOosLockedRef.current = true;
+    setSevenDollarOosStatus('checking');
+    setSevenDollarOosAttempt((prev) => prev + 1);
+  }, []);
+
+  const continueWithoutSevenDollarOos = useCallback(() => {
+    // 이전 목록과 성공 날짜는 변경하지 않고 이번 진입의 잠금만 해제한다.
+    sevenDollarOosLockedRef.current = false;
+    setSevenDollarOosStatus('ready');
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+
+    if (!state.selectedVendorId || !isSevenDollarVendor(state.selectedVendorId)) {
+      sevenDollarOosLockedRef.current = false;
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    sevenDollarOosLockedRef.current = true;
+    setSevenDollarOosStatus('checking');
+
+    const unlock = () => {
+      if (!active) return;
+      sevenDollarOosLockedRef.current = false;
+      setSevenDollarOosStatus('ready');
+    };
+
+    const refreshOos = async () => {
+      const selectedDate = localDateKey();
+
+      // 같은 실행 중 이미 당일 성공했다면 메모리의 목록을 재사용한다.
+      if (sevenDollarOosSuccessDateRef.current === selectedDate) {
+        unlock();
+        return;
+      }
+
+      // 앱 재시작 후에도 저장된 목록과 성공 날짜를 복원한다.
+      try {
+        const raw = await AsyncStorage.getItem(SEVEN_DOLLAR_OOS_STORAGE_KEY);
+        if (!active) return;
+
+        if (raw) {
+          const cached = JSON.parse(raw);
+
+          if (
+            cached &&
+            typeof cached.successDate === 'string' &&
+            /^\d{4}-\d{2}-\d{2}$/.test(cached.successDate) &&
+            Array.isArray(cached.skus) &&
+            cached.skus.every(
+              (sku: unknown) => typeof sku === 'string' && sku.trim().length > 0,
+            )
+          ) {
+            const cachedOos = new Set<string>(
+              cached.skus.map((sku: string) => sku.trim().toUpperCase()),
+            );
+
+            sevenDollarOosRef.current = cachedOos;
+            sevenDollarOosSuccessDateRef.current = cached.successDate;
+            setSevenDollarOosSkus(cachedOos);
+
+            if (cached.successDate === selectedDate) {
+              unlock();
+              return;
+            }
+          }
+        }
+      } catch (error) {
+        // 캐시를 읽지 못해도 기존 메모리 목록을 유지하고 다운로드를 시도한다.
+        console.warn('7D stock cache load failed:', error);
+      }
+
+      if (!active) return;
+      setSevenDollarOosStatus('syncing');
+
+      timeout = setTimeout(() => controller.abort(), 60000);
+
+      try {
+        const res = await fetch('https://7dollar.app/products/getallfilteredproducts', {
+          method: 'POST',
+          credentials: 'omit',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            categoryIds: [],
+            subCategoryIds: [],
+            manufacturerIds: [],
+            startIndex: 0,
+            maxCount: 10000,
+            productName: '',
+          }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!active) return;
+        if (controller.signal.aborted) throw new Error('Stock refresh timed out');
+
+        // 전체 목록을 받았을 때만 새 OOS 목록을 적용한다.
+        if (
+          !Array.isArray(data.products) ||
+          !Number.isSafeInteger(data.productCount) ||
+          data.productCount <= 0 ||
+          data.products.length !== data.productCount
+        ) {
+          throw new Error('Incomplete product list');
+        }
+
+        const nextOos = new Set<string>();
+        for (const product of data.products) {
+          if (
+            typeof product?.sku !== 'string' ||
+            !product.sku.trim() ||
+            typeof product.canBePurchased !== 'boolean'
+          ) {
+            throw new Error('Invalid stock data');
+          }
+
+          if (product.canBePurchased === false) {
+            nextOos.add(product.sku.trim().toUpperCase());
+          }
+        }
+
+        clearTimeout(timeout);
+        timeout = undefined;
+
+        const successDate = localDateKey();
+
+        // 목록과 날짜를 한 번에 저장한 뒤 성공 상태를 적용한다.
+        await AsyncStorage.setItem(
+          SEVEN_DOLLAR_OOS_STORAGE_KEY,
+          JSON.stringify({
+            successDate,
+            skus: Array.from(nextOos),
+          }),
+        );
+
+        if (!active) return;
+
+        sevenDollarOosRef.current = nextOos;
+        sevenDollarOosSuccessDateRef.current = successDate;
+        setSevenDollarOosSkus(nextOos);
+        unlock();
+      } catch (error) {
+        if (!active) return;
+
+        console.warn('7D stock refresh failed:', error);
+
+        // 이전 목록과 성공 날짜를 유지한다. 자동 재시도는 하지 않는다.
+        sevenDollarOosLockedRef.current = true;
+        setSevenDollarOosStatus('failed');
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+      }
+    };
+
+    void refreshOos();
+
+    return () => {
+      active = false;
+      if (timeout !== undefined) clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [loading, state.selectedVendorId, sevenDollarOosAttempt]);
+
+  const sevenDollarWorkLocked =
+    !loading &&
+    Boolean(state.selectedVendorId && isSevenDollarVendor(state.selectedVendorId)) &&
+    sevenDollarOosStatus !== 'ready';
+
   // ---------- auth ----------
   // exchanges the one-time code from the OAuth redirect and stores the session
   // 같은 1회용 코드를 두 경로(브라우저 복귀 + 딥링크 안전망)가 동시에 교환하면
@@ -479,7 +844,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       AsyncStorage.removeItem(NONCE_KEY).catch(() => {});
       const role: Role = toRole(v.role);
-      const session = { email: String(v.email).toLowerCase(), role };
+      const session = { email: String(v.email).toLowerCase(), role, purchaseToken: String(v.purchaseToken || '') };
       patch({ session });
       // persist the session immediately — the fire-and-forget state effect can
       // lose the race (browser round-trip may remount the app with stale storage)
@@ -706,11 +1071,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         return { ...prev, users: merged, session };
       });
+      refreshPurchaseAccess();
       return { ok: true, message: `Loaded ${data.users.length} user(s) from the sheet` };
     } catch (e: any) {
       return { ok: false, message: e?.message ?? 'Failed to load users' };
     }
-  }, [state.settings.appsScriptUrl]);
+  }, [state.settings.appsScriptUrl, refreshPurchaseAccess]);
 
   /** Staff device: check whether admin has approved and issued a PIN. */
   const checkApproval = useCallback(
@@ -794,7 +1160,18 @@ const removeUser = useCallback(
   );
   const setSelectedVendorId = useCallback(
     (id: string | null) => {
+      if (id && isSevenDollarVendor(id)) {
+        // 동일 벤더 재선택도 날짜를 다시 확인한다.
+        // CONTINUE WITHOUT 이후 재진입 시 당일 성공 기록이 없으면 재다운로드한다.
+        sevenDollarOosLockedRef.current = true;
+        setSevenDollarOosStatus('checking');
+        setSevenDollarOosAttempt((prev) => prev + 1);
+      } else {
+        sevenDollarOosLockedRef.current = false;
+      }
+
       patch({ selectedVendorId: id });
+
       // 벤더 선택 시 동기화 모드: 그 벤더 상품만 백그라운드로 최신화
       // (기존 캐시는 즉시 사용 가능 — 도착하면 교체됨)
       if (id && stateRef.current.settings.syncMode === 'vendor') {
@@ -897,6 +1274,14 @@ const removeUser = useCallback(
   (upc: string, qty: number, opt?: string) => {
     const currentVendorId = stateRef.current.selectedVendorId;
     if (!currentVendorId) return;
+
+    // UI 외의 호출도 OOS 수량 변경을 막는다. 삭제(qty=0)는 허용한다.
+    if (qty > 0 && isSevenDollarVendor(currentVendorId)) {
+      const product = stateRef.current.products.find(
+        (p) => p.upc === upc && p.vendorId === currentVendorId,
+      );
+      if (product && sevenDollarOosRef.current.has(sevenDollarSku(product.itemCode))) return;
+    }
 
     setState((prev) => {
       const q = Math.max(0, qty);
@@ -1428,7 +1813,7 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
               upc: String(p.upc ?? ''),
               itemCode: String(p.itemCode ?? ''),
               description: String(p.description ?? ''),
-              cost: Number(p.cost ?? 0),
+              cost: String(p.cost ?? '0'),
               vendorId: vendor?.id ?? vendorName,
               imageUrl: p.imageUrl ? String(p.imageUrl) : undefined,
             };
@@ -1549,7 +1934,7 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
             upc: String(p.upc ?? ''),
             itemCode: String(p.itemCode ?? ''),
             description: String(p.description ?? ''),
-            cost: Number(p.cost ?? 0),
+            cost: String(p.cost ?? '0'),
             vendorId,
             imageUrl: p.imageUrl ? String(p.imageUrl) : undefined,
           }))
@@ -1639,6 +2024,8 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
 
   const value: AppContextValue = {
     ...state,
+    purchaseAccess,
+    refreshPurchaseAccess,
     appVersion: APP_BUILD_KEY,
     loading,
     login,
@@ -1656,16 +2043,38 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
     setSelectedVendorId,
     setShipToJBS,
     setDepartment,
-    addToScanList,
-    removeFromScanList,
-    setQty,
+    addToScanList: (upc) => {
+      if (isSevenDollarWorkLocked()) return;
+      addToScanList(upc);
+    },
+    removeFromScanList: (upc, opt) => {
+      if (isSevenDollarWorkLocked()) return;
+      removeFromScanList(upc, opt);
+    },
+    setQty: (upc, qty, opt) => {
+      if (isSevenDollarWorkLocked()) return;
+      setQty(upc, qty, opt);
+    },
     clearCart,
     cartTotal,
     qtyOf,
-    relatedItems,
-    findAllByUpc,
-    findByUpc,
-    searchProducts,
+    relatedItems: (product) => {
+      if (isSevenDollarWorkLocked()) return [];
+      return relatedItems(product);
+    },
+    findAllByUpc: (upc) => {
+      if (isSevenDollarWorkLocked()) return [];
+      return findAllByUpc(upc);
+    },
+    findByUpc: (upc) => {
+      if (isSevenDollarWorkLocked()) return undefined;
+      return findByUpc(upc);
+    },
+    searchProducts: (kw) => {
+      if (isSevenDollarWorkLocked()) return [];
+      return searchProducts(kw);
+    },
+    isProductOutOfStock,
     saveCart,
     loadCart,
     deleteSavedCart,
@@ -1685,7 +2094,130 @@ const importFromSheet = async (tabName: string): Promise<{ ok: boolean; message?
     generateJOrderId,
   };
 
-  return <AppContext.Provider value={{ ...value, getTabList, importFromSheet }}>{children}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={{ ...value, getTabList, importFromSheet }}>
+      <View
+        style={{ flex: 1 }}
+        pointerEvents={sevenDollarWorkLocked ? 'none' : 'auto'}
+        accessibilityElementsHidden={sevenDollarWorkLocked}
+        importantForAccessibility={
+          sevenDollarWorkLocked ? 'no-hide-descendants' : 'auto'
+        }
+        {...(Platform.OS === 'web' && sevenDollarWorkLocked
+          ? ({ inert: '' } as any)
+          : {})}
+      >
+        {children}
+      </View>
+
+      <Modal
+        visible={sevenDollarWorkLocked}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.45)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          {sevenDollarOosStatus === 'failed' ? (
+            <View
+              accessibilityViewIsModal
+              style={{
+                width: '100%',
+                maxWidth: 380,
+                backgroundColor: '#FFFFFF',
+                borderRadius: 14,
+                padding: 20,
+              }}
+            >
+              <Text
+                accessibilityRole="header"
+                style={{
+                  color: '#111111',
+                  fontSize: 17,
+                  fontWeight: '700',
+                  textAlign: 'center',
+                  marginBottom: 22,
+                }}
+              >
+                {'FAILED TO RETRIEVE\nFULL OUT OF STOCK LIST'}
+              </Text>
+
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'stretch',
+                  gap: 10,
+                }}
+              >
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={retrySevenDollarOos}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    minHeight: 48,
+                    borderRadius: 8,
+                    backgroundColor: '#EEEEEE',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    paddingHorizontal: 8,
+                    paddingVertical: 12,
+                    opacity: pressed ? 0.5 : 1,
+                  })}
+                >
+                  <Text
+                    style={{
+                      color: '#111111',
+                      fontSize: 13,
+                      fontWeight: '700',
+                      textAlign: 'center',
+                    }}
+                  >
+                    RETRY
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={continueWithoutSevenDollarOos}
+                  style={({ pressed }) => ({
+                    flex: 2,
+                    minHeight: 48,
+                    borderRadius: 8,
+                    backgroundColor: '#EEEEEE',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    paddingHorizontal: 8,
+                    paddingVertical: 12,
+                    opacity: pressed ? 0.5 : 1,
+                  })}
+                >
+                  <Text
+                    style={{
+                      color: '#111111',
+                      fontSize: 13,
+                      fontWeight: '700',
+                      textAlign: 'center',
+                    }}
+                  >
+                    CONTINUE WITHOUT
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <ActivityIndicator size="large" color="#FFFFFF" />
+          )}
+        </View>
+      </Modal>
+    </AppContext.Provider>
+  );
 }
 
 export function useOptionalApp(): AppContextValue | null {

@@ -1,4 +1,4 @@
-// 최종 수정: 2026-10-04 09:22 AM(CT) 배포   //7 DOLLAR AUTOMATION
+// 최종 수정: 2026-10-20 12:45 PM(CT) 배포
 var SS = SpreadsheetApp.getActiveSpreadsheet();
 function doGet(e) {
   
@@ -45,9 +45,11 @@ function doGet(e) {
       if (!cached) return json_({ ok: false, error: 'invalid or expired code' });
       CacheService.getScriptCache().remove('auth_' + t);
       var data = JSON.parse(cached);
-      return json_({ ok: true, email: data.email, role: data.role, n: data.n });
+      return json_({ ok: true, email: data.email, role: data.role, n: data.n, purchaseToken: createPurchaseToken_(data.email) });
     }
     // ?vendor=NAME → 그 벤더 상품만 (벤더 선택 시 동기화 모드용), ?scope=light → 상품 제외 전체
+    if (action === 'purchase') return json_(getPurchaseData_(e.parameter.token, e.parameter.department));
+    if (action === 'purchaseAccess') return json_(getPurchaseAccess_(e.parameter.token));
     if (action === 'data') return json_(getData_(e.parameter.scope, e.parameter.vendor));
     if (action === 'users') return json_({ users: getUsers_() });
     if (action === 'user') {
@@ -448,14 +450,34 @@ function getProducts_(onlyVendor) {
     if (iUpc < 0) return;
     var rows = sh.getDataRange().getValues();
     for (var r = 0; r < rows.length; r++) {
-      var upc = String(rows[r][iUpc] || '').replace(/[^0-9]/g, '');
-      if (!/^\d{6,14}$/.test(upc)) continue; // skips headers/brand rows
-      var cost = iCost >= 0 ? parseFloat(String(rows[r][iCost]).replace(/[$,\s]/g, '')) : 0;
+      var rawUpc = String(rows[r][iUpc] == null ? '' : rows[r][iUpc]).trim();
+      var hasLetters = /[A-Za-z]/.test(rawUpc);
+      var upc = hasLetters ? rawUpc : rawUpc.replace(/[^0-9]/g, '');
+
+      if (!/^[A-Za-z0-9-]{6,14}$/.test(upc)) continue;
+
+      if (hasLetters) {
+        if (/^(UPC|BARCODE|EAN|ITEMCODE|ITEM-CODE)$/i.test(upc)) continue;
+
+        var codeText = iCode >= 0 ? String(rows[r][iCode] ?? '').trim() : '';
+        var descText = iDesc >= 0 ? String(rows[r][iDesc] ?? '').trim() : '';
+
+        if (!codeText && !descText) continue;
+      }
+      
+      // 슬래시(/)를 보존하여 단일 단가 및 복수 단위 단가("10 / 20") 모두 온전히 전송
+      var rawCost = iCost >= 0 ? String(rows[r][iCost] == null ? '' : rows[r][iCost]).trim() : '0';
+      var costParts = rawCost.split('/').map(function (s) {
+        var clean = s.replace(/[^0-9.]/g, '').trim();
+        return clean || '0';
+      });
+      var cost = costParts.join(' / ');
+
       out.push({
         upc: upc,
         itemCode: String(iCode >= 0 ? rows[r][iCode] : '').trim(),
         description: String(iDesc >= 0 ? rows[r][iDesc] : '').trim(),
-        cost: isNaN(cost) ? 0 : cost,
+        cost: cost,
         vendor: v.name,
         imageUrl: iImg >= 0 ? String(rows[r][iImg] || '').trim() : '',
       });
@@ -625,7 +647,10 @@ function recordOrderInner_(sh, body, startTime) { // startTime 파라미터
 
   // 5) Order Backup 스프레드시트에 값+서식 사본 탭 추가 — 실패 시 어느 단계인지 표시
   try {
-    backupOrderTab_(sh, fileName, body.department);
+    var xlsxError = backupOrderTab_(sh, fileName, body.department);
+    if (xlsxError) {
+      emailNote = (emailNote ? emailNote + '\n' : '') + xlsxError;
+    }
   } catch (bkErr) {
     throw new Error('[BACKUP] ' + bkErr);
   }
@@ -755,51 +780,172 @@ function backupOrderTab_(sh, tabName, department) {
       var parentFolders = fileObj.getParents();
       if (parentFolders.hasNext()) {
         var folder = parentFolders.next();
-        var g4Val = String(sh.getRange('G4').getValue() || '');
+        SpreadsheetApp.flush();
+        var g4Val = String(copied.getRange('G4').getDisplayValue() || '');
         folder.createFile(tabName + '.txt', g4Val, MimeType.PLAIN_TEXT);
       }
     } catch (txtErr) {
       console.error('Failed to create 7 DOLLAR text file: ' + txtErr);
+    }
+  } else if (vendorVal === 'IVY' || vendorVal === 'RED') {
+    var tempSS = null;
+    try {
+      var orderFile = DriveApp.getFileById(config.orderFileId);
+      var orderParents = orderFile.getParents();
+      if (!orderParents.hasNext()) {
+        throw new Error('XLSX 저장 폴더를 찾을 수 없습니다.');
+      }
+      var xlsxFolder = orderParents.next();
+
+      var xlsxRows = [['Item', 'Qty']];
+
+      // 원본 시트: B=UPC, C=ItemCode, D=Description, E=Cost, F=Qty
+      var sourceRows = sh.getRange(9, 2, lastRow - 8, 5).getValues();
+
+      sourceRows.forEach(function (row) {
+        var upc = String(row[0] == null ? '' : row[0]).trim();
+        var itemCode = String(row[1] == null ? '' : row[1]).trim();
+        if (!upc && !itemCode) return;
+
+        var description = String(row[2] == null ? '' : row[2]);
+        var qty = Number(row[4]) || 0;
+        var match = description.match(/\(([^)]*)\)/);
+        var multiplier = 1;
+
+        // 첫 괄호가 없거나 내용이 숫자가 아니면 배수 1
+        if (match) {
+          var packText = match[1].trim();
+          if (/^\d+(?:\.\d+)?$/.test(packText)) {
+            var packNumber = Number(packText);
+            if (isFinite(packNumber)) multiplier = packNumber;
+          }
+        }
+
+        xlsxRows.push([itemCode, qty * multiplier]);
+      });
+
+      // 임시 스프레드시트를 만든 뒤 실제 XLSX 형식으로 내보내기
+      tempSS = SpreadsheetApp.create(tabName.slice(0, 100));
+      var xlsxSheet = tempSS.getSheets()[0];
+      xlsxSheet.setName('Order');
+
+      if (xlsxRows.length > xlsxSheet.getMaxRows()) {
+        xlsxSheet.insertRowsAfter(
+          xlsxSheet.getMaxRows(),
+          xlsxRows.length - xlsxSheet.getMaxRows()
+        );
+      }
+
+      // ItemCode의 앞자리 0 보존
+      xlsxSheet.getRange(1, 1, xlsxRows.length, 1).setNumberFormat('@');
+      xlsxSheet.getRange(1, 1, xlsxRows.length, 2).setValues(xlsxRows);
+      xlsxSheet.getRange('B:B').setNumberFormat('0');
+      xlsxSheet.getRange('A1:B1').setFontWeight('bold');
+      xlsxSheet.setFrozenRows(1);
+      xlsxSheet.autoResizeColumns(1, 2);
+      SpreadsheetApp.flush();
+
+      var xlsxResponse = UrlFetchApp.fetch(
+        'https://docs.google.com/spreadsheets/d/' +
+        tempSS.getId() + '/export?format=xlsx',
+        {
+          headers: {
+            Authorization: 'Bearer ' + ScriptApp.getOAuthToken()
+          }
+        }
+      );
+
+      var xlsxBlob = xlsxResponse.getBlob()
+        .setContentType(
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        .setName(tabName + '.xlsx');
+
+      xlsxFolder.createFile(xlsxBlob);
+    } catch (xlsxErr) {
+      var xlsxError = 'Failed to create ' + vendorVal + ' XLSX file: ' + String(xlsxErr);
+      console.error(xlsxError);
+      return xlsxError;
+    } finally {
+      if (tempSS) {
+        try {
+          DriveApp.getFileById(tempSS.getId()).setTrashed(true);
+        } catch (cleanupErr) {
+          console.error('Failed to remove temporary spreadsheet: ' + cleanupErr);
+        }
+      }
     }
   }
 }
 
 // 외부 스프레드시트 월별 탭에 발주 내역 기록
 function logOrderToExternalSheet_(body, pdfUrl, department) {
-  var deptKey = String(department || body.department || 'PRODUCT').trim().toUpperCase();
-  
-  // 부서별 외부 시트 ID 설정 (PRODUCT 시트 생성 후 아래 PRODUCT 주소만 교체)
-  var sheetIds = {
-    'GM': '1h9W5COqxs56N8gkqEBvuupHPHZ0Hf43-Hihrwg1b9Fw',
-    'PRODUCT': '1h9W5COqxs56N8gkqEBvuupHPHZ0Hf43-Hihrwg1b9Fw'
-  };
-  var logSheetId = sheetIds[deptKey] || sheetIds['PRODUCT'];
-  
+  var logStep = '부서 확인';
+  var deptKey = '';
+  var logSheetId = '';
+  var monthTabName = '';
+  var targetRow = 0;
+
+  try {
+    deptKey = String(department || body.department || 'PRODUCT').trim().toUpperCase();
+
+  // GM / PRODUCT 구매일지는 PURCHASE 조회와 같은 통합 파일을 사용.
+  logSheetId = PURCHASE_SOURCE_ID_;
+
+  logStep = '구매일지 파일 열기';
   var ss = SpreadsheetApp.openById(logSheetId);
-  
+
+  logStep = '월 이름 및 부서별 탭 이름 계산';
   var now = new Date();
   var monthNames = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
-  var monthTabName = monthNames[now.getMonth()];
-  
+
+  // GM → OCTOBER GM / PRODUCT → OCTOBER PD
+  monthTabName = monthNames[now.getMonth()] + (deptKey === 'GM' ? ' GM' : ' PD');
+
+   logStep = '월별 탭 조회';
   var sh = ss.getSheetByName(monthTabName);
-  if (!sh) return; // 해당 월의 탭이 없으면 에러 없이 패스
-  
+
+  if (!sh) {
+    throw new Error(
+      '월별 탭을 찾을 수 없습니다.' +
+      '\n실제 파일ID=' + ss.getId() +
+      '\n조회 탭 이름=[' + monthTabName + ']'
+    );
+  }
+
+  logStep = '날짜 및 주문 값 준비';
   var formattedDate = Utilities.formatDate(now, TIMEZONE, 'MM/dd/yyyy');
   var store = body.store || '';
   var vendor = body.vendor || '';
   var jorderid = body.jorderid || '';
   var total = body.total || 0;
   
-  // A3 이후 첫 빈 행 찾기 (A열 데이터 기준)
-  var targetRow = 3;
+  // A열의 마지막 실제 발주 기록 바로 다음 행 찾기
+  logStep = '시트 마지막 셀 조회';
+  targetRow = 3;
+  var bottomRow = sh.getMaxRows();
+  var bottomCell = sh.getRange(bottomRow, 1);
+
+  logStep = '시트 마지막 셀 조회';
+  targetRow = 3;
+  var lastDataRow = 2;
   var lastRow = sh.getLastRow();
+
+  logStep = 'A열 마지막 기록 행 탐색';
   if (lastRow >= 3) {
-    var aValues = sh.getRange(3, 1, lastRow - 2, 1).getValues();
-    for (var i = 0; i < aValues.length; i++) {
-      if (String(aValues[i][0]).trim() !== '') {
-        targetRow = i + 4; // 0-index 기준(i)에서 실제 행 번호 계산
+    var dates = sh.getRange(3, 1, lastRow - 2, 1).getDisplayValues();
+    for (var i = dates.length - 1; i >= 0; i--) {
+      if (String(dates[i][0] || '').trim() !== '') {
+        lastDataRow = i + 3;
+        break;
       }
     }
+  }
+
+  logStep = '기록 행 및 링크 준비';
+
+  if (lastDataRow >= 3) {
+    targetRow = lastDataRow + 1;
   }
   
   // E열: PDF 링크가 있고 order ID도 있으면 하이퍼링크 수식 적용, 아니면 일반 텍스트
@@ -821,9 +967,24 @@ function logOrderToExternalSheet_(body, pdfUrl, department) {
   ]];
   
   // 찾은 빈 행에 한 번에 값 쓰기 (수식은 자동으로 텍스트 수식으로 파싱됨)
-  sh.getRange(targetRow, 1, 1, 8).setValues(rowData);
-}
+  logStep = '기록 범위 선택';
+  var writeRange = sh.getRange(targetRow, 1, 1, 8);
 
+  logStep = 'A:H 주문 기록';
+  writeRange.setValues(rowData);
+
+  } catch (err) {
+    throw new Error(
+      '단계=' + logStep +
+      '\n부서=' + deptKey +
+      '\n파일ID=[' + logSheetId + ']' +
+      '\n월=' + monthTabName +
+      '\n기록행=' + targetRow +
+      '\n원인=' + String(err) +
+      '\n위치=' + (err && err.stack ? String(err.stack) : '')
+    );
+  }
+}
 /* ============================ EXPORT ============================= */
 
 // EXPORT 흐름: 탭 기록 → 백업 탭 저장 → 원본 초기화
@@ -1100,4 +1261,419 @@ function handleDeleteTab_(body) {
   backupSS.deleteSheet(sh);
   
   return { ok: true, message: 'Tab safely deleted' };
+}
+
+/* ======================== PURCHASE VIEW (READ ONLY) ======================== */
+// Department badges remain GM / PRODUCT. Both read tabs in one GM spreadsheet.
+var PURCHASE_SOURCE_ID_ = '1h9W5COqxs56N8gkqEBvuupHPHZ0Hf43-Hihrwg1b9Fw';
+var PURCHASE_DEPARTMENTS_ = ['GM', 'PRODUCT'];
+// Map the existing department/badge names to spreadsheet tab suffixes.
+var PURCHASE_TAB_SUFFIX_ = { GM: 'GM', PRODUCT: 'PD' };
+
+// Run manually from the Apps Script editor. Read-only; no web endpoint.
+var PURCHASE_TAB_SUFFIX_ = { GM: 'GM', PRODUCT: 'PD' };
+
+// PURCHASE access is controlled by the USERS sheet.
+// G column: GM, PRODUCT, or ALL.
+// H column: comma-separated store names or ALL.
+// MASTER can access both departments and all stores regardless of G/H.
+// ADMINISTRATOR requires valid G/H permissions. STAFF cannot access PURCHASE.
+
+function purchaseUpper_(value) {
+  return String(value === null || value === undefined ? '' : value)
+    .trim().toUpperCase();
+}
+
+function purchaseAclForUser_(email, role) {
+  var normalizedRole = String(role || '').trim().toLowerCase();
+  var isMaster = /^master/.test(normalizedRole);
+  var isAdmin = /^admin/.test(normalizedRole);
+  if (!isMaster && !isAdmin) return null;
+
+  // Find the authenticated user's row in USERS.
+  var row = findUserRow_(String(email || '').trim().toLowerCase());
+  if (row === -1) return null;
+
+  // Only a server-verified MASTER role bypasses G/H.
+  if (isMaster) {
+    return { sheets: PURCHASE_DEPARTMENTS_.slice(), stores: ['ALL'] };
+  }
+
+  // ADMIN permissions are read from USERS G:H.
+  var values = usersSheet_().getRange(row, 7, 1, 2).getDisplayValues()[0];
+  var department = purchaseUpper_(values[0]);  // G
+  var storeText = purchaseUpper_(values[1]);    // H
+
+  // Both fields are mandatory for ADMIN.
+  if (!department || !storeText) return null;
+
+  // Department permission: GM, PRODUCT, or ALL.
+  var sheets;
+  if (department === 'ALL') {
+    sheets = PURCHASE_DEPARTMENTS_.slice();
+  } else if (PURCHASE_DEPARTMENTS_.indexOf(department) !== -1) {
+    sheets = [department];
+  } else {
+    return null;
+  }
+
+  // Store permission: ALL or comma-separated store names.
+  var stores;
+  if (storeText === 'ALL') {
+    stores = ['ALL'];
+  } else {
+    stores = storeText.split(',').map(purchaseUpper_).filter(function (v) {
+      return !!v;
+    });
+
+    // Reject empty permissions or ALL mixed with store names.
+    if (!stores.length || stores.indexOf('ALL') !== -1) return null;
+
+    // Remove duplicates.
+    stores = stores.filter(function (v, i) {
+      return stores.indexOf(v) === i;
+    });
+  }
+
+  return {
+    sheets: sheets,
+    stores: stores
+  };
+}
+
+// Return the authenticated user's PURCHASE scope to the app.
+function getPurchaseAccess_(token) {
+  var email = verifiedPurchaseEmail_(token);
+  if (!email) {
+    return { ok: false, error: 'PURCHASE_LOGIN_REQUIRED' };
+  }
+
+  var user = getUsers_().filter(function (u) {
+    return String(u.email || '').trim().toLowerCase() === email;
+  })[0];
+  var access = user && purchaseAclForUser_(email, user.role);
+  if (!access) {
+    return { ok: true, allowed: false, departments: [], stores: [] };
+  }
+
+  return {
+    ok: true,
+    allowed: true,
+    departments: access.sheets.slice(),
+    stores: access.stores.slice()
+  };
+}
+
+function purchaseStoreAllowed_(name, allowedStores) {
+  var key = purchaseUpper_(name);
+  return !!key && (allowedStores.indexOf('ALL') !== -1 || allowedStores.indexOf(key) !== -1);
+}
+
+// Authresult returns a signed, time-limited token only after the existing
+// Google OAuth / one-time-code exchange succeeds. No password or role is sent
+// by the client to authorize a purchase read.
+function createPurchaseToken_(email) {
+  var secret = PropertiesService.getScriptProperties().getProperty('OAUTH_CLIENT_SECRET');
+  if (!secret) throw new Error('OAUTH_CLIENT_SECRET is not configured');
+  var claim = {
+    email: String(email || '').trim().toLowerCase(),
+    exp: Date.now() + 90 * 24 * 60 * 60 * 1000
+  };
+  var payload = Utilities.base64EncodeWebSafe(JSON.stringify(claim)).replace(/=+$/g, '');
+  var signature = Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(payload, secret)
+  ).replace(/=+$/g, '');
+  return payload + '.' + signature;
+}
+
+function verifiedPurchaseEmail_(token) {
+  var parts = String(token || '').split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return '';
+  var secret = PropertiesService.getScriptProperties().getProperty('OAUTH_CLIENT_SECRET');
+  if (!secret) return '';
+  var expected = Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(parts[0], secret)
+  ).replace(/=+$/g, '');
+  if (expected !== parts[1]) return '';
+  try {
+    var claim = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(parts[0])).getDataAsString());
+    if (!claim.exp || Number(claim.exp) < Date.now()) return '';
+    return String(claim.email || '').trim().toLowerCase();
+  } catch (err) {
+    return '';
+  }
+}
+
+function purchaseNumeric_(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  var n = Number(String(v).replace(/[$,\s]/g, ''));
+  return isFinite(n) ? n : null;
+}
+
+// Get a URL from Apps Script rich text, formula, or a raw URL cell.
+// A Sheets HYPERLINK formula does not always expose its URL in RichTextValue.
+function purchaseLink_(rich, formula, displayValue) {
+  var url = rich && rich.getLinkUrl ? rich.getLinkUrl() : '';
+  if (!url && rich && rich.getRuns) {
+    var runs = rich.getRuns();
+    for (var i = 0; i < runs.length; i++) {
+      if (runs[i].getLinkUrl && runs[i].getLinkUrl()) {
+        url = runs[i].getLinkUrl();
+        break;
+      }
+    }
+  }
+  if (!url && formula) {
+    // =HYPERLINK("https://...", "caption") or localized argument separator.
+    var match = String(formula).match(/^\s*=\s*HYPERLINK\s*\(\s*"((?:[^"]|"")*)"/i);
+    if (match) url = match[1].replace(/""/g, '"');
+  }
+  if (!url && /^https?:\/\//i.test(String(displayValue || '').trim())) {
+    url = String(displayValue).trim();
+  }
+  url = String(url || '').trim();
+  return /^https?:\/\//i.test(url) ? url : '';
+}
+
+// F cells may have cell-level or text-run links accessible through the Sheets
+// API even when SpreadsheetApp's RichTextValue / formula returns no URL.
+function purchaseApiCellLink_(cell) {
+  if (!cell) return '';
+  var url = purchaseLink_(null, '', cell.hyperlink);
+  if (url) return url;
+  var styles = [cell.userEnteredFormat, cell.effectiveFormat];
+  for (var s = 0; s < styles.length; s++) {
+    var style = styles[s];
+    if (style && style.textFormat && style.textFormat.link) {
+      url = purchaseLink_(null, '', style.textFormat.link.uri);
+      if (url) return url;
+    }
+  }
+  var runs = cell.textFormatRuns || [];
+  for (var i = 0; i < runs.length; i++) {
+    var link = runs[i] && runs[i].format && runs[i].format.link;
+    url = purchaseLink_(null, '', link && link.uri);
+    if (url) return url;
+  }
+  var entered = cell.userEnteredValue || {};
+  return purchaseLink_(null, entered.formulaValue || '', entered.stringValue || '');
+}
+
+// Read only rows whose PO/invoice labels have no hyperlink in SpreadsheetApp.
+// sheetName must be the actual tab name, e.g., 'OCTOBER PD'.
+function purchaseLinksFromApi_(sourceId, sheetName, neededRows) {
+  var found = {};
+  var rowSet = {};
+  (neededRows || []).forEach(function (v) {
+    var n = Number(v);
+    if (isFinite(n) && n >= 3 && Math.floor(n) === n) rowSet[n] = true;
+  });
+  var rows = Object.keys(rowSet).map(Number).sort(function (a, b) { return a - b; });
+  if (!rows.length) return found;
+
+  // Never ask Google Sheets for more than 100 rows in one JSON response.
+  var chunks = [];
+  var first = rows[0], last = first;
+  for (var i = 1; i < rows.length; i++) {
+    if (rows[i] - first >= 100) {
+      chunks.push([first, last]);
+      first = rows[i];
+    }
+    last = rows[i];
+  }
+  chunks.push([first, last]);
+
+  var fieldMask = 'sheets(data(startRow,rowData(values(hyperlink,textFormatRuns,userEnteredFormat,effectiveFormat,userEnteredValue))))';
+  var cleanSheetName = String(sheetName).replace(/'/g, "''");
+  chunks.forEach(function (chunk) {
+    var range = "'" + cleanSheetName + "'!E" + chunk[0] + ':F' + chunk[1];
+    try {
+      var url = 'https://sheets.googleapis.com/v4/spreadsheets/' +
+        encodeURIComponent(sourceId) + '?ranges=' + encodeURIComponent(range) +
+        '&includeGridData=true&fields=' + encodeURIComponent(fieldMask);
+      var response = UrlFetchApp.fetch(url, {
+        headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+        muteHttpExceptions: true
+      });
+      if (response.getResponseCode() !== 200) {
+        console.warn('PURCHASE link fallback ' + range + ': HTTP ' + response.getResponseCode());
+        return;
+      }
+      var result = JSON.parse(response.getContentText());
+      (result.sheets || []).forEach(function (sheet) {
+        (sheet.data || []).forEach(function (block) {
+          var firstRow = typeof block.startRow === 'number' ? block.startRow + 1 : chunk[0];
+          (block.rowData || []).forEach(function (entry, offset) {
+            var row = firstRow + offset;
+            if (!rowSet[row]) return;
+            var values = entry && entry.values || [];
+            var poUrl = purchaseApiCellLink_(values[0]);
+            var invoiceUrl = purchaseApiCellLink_(values[1]);
+            if (poUrl || invoiceUrl) {
+              found[row] = { poUrl: poUrl, invoiceUrl: invoiceUrl };
+            }
+          });
+        });
+      });
+    } catch (err) {
+      console.warn('PURCHASE link fallback ' + range + ': ' + String(err));
+    }
+  });
+  return found;
+}
+
+function getPurchaseData_(token, requestedDepartment) {
+  var purchaseStartedAt = Date.now();
+  var email = verifiedPurchaseEmail_(token);
+  if (!email) {
+    return { ok: false, error: 'PURCHASE_LOGIN_REQUIRED', message: 'Purchase session unavailable.' };
+  }
+
+  var user = getUsers_().filter(function (u) {
+    return String(u.email || '').trim().toLowerCase() === email;
+  })[0];
+  var access = user && purchaseAclForUser_(email, user.role);
+  if (!access) {
+    return { ok: false, error: 'PURCHASE_ACCESS_DENIED', message: 'Purchase access is not granted to this account.' };
+  }
+
+  // Badge/API name stays PRODUCT. PD is only the actual tab suffix.
+  var requested = purchaseUpper_(requestedDepartment || '');
+  var department = requested || (access.sheets.indexOf('GM') !== -1 ? 'GM' : access.sheets[0]);
+
+  // Authorization MUST happen before reading the Google Sheet.
+  if (access.sheets.indexOf(department) === -1) {
+    return { ok: false, error: 'PURCHASE_ACCESS_DENIED', message: 'Access to ' + department + ' purchases is not granted.' };
+  }
+
+  var month = Utilities.formatDate(new Date(), 'America/Chicago', 'MMMM').toUpperCase();
+  var sheetName = month + ' ' + PURCHASE_TAB_SUFFIX_[department]; // GM -> OCTOBER GM; PRODUCT -> OCTOBER PD
+  var source = SpreadsheetApp.openById(PURCHASE_SOURCE_ID_);
+  var sh = source.getSheetByName(sheetName);
+  if (!sh) {
+    return { ok: false, error: 'PURCHASE_MONTH_MISSING', message: 'Missing ' + sheetName + ' tab in purchase source.' };
+  }
+
+  // A contains actual purchase dates; other columns may include empty formulas.
+  var purchaseReadStartedAt = Date.now();
+  var bottomRow = sh.getMaxRows();
+  var bottomCell = sh.getRange(bottomRow, 1);
+  var lastRow = String(bottomCell.getDisplayValue() || '').trim()
+    ? bottomRow
+    : bottomCell.getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
+  var recordCount = Math.max(0, lastRow - 2);
+  var rows = recordCount ? sh.getRange(3, 1, recordCount, 8).getValues() : [];
+  var displayRows = recordCount ? sh.getRange(3, 1, recordCount, 8).getDisplayValues() : [];
+  var links = recordCount ? sh.getRange(3, 5, recordCount, 2).getRichTextValues() : [];
+  var formulas = recordCount ? sh.getRange(3, 5, recordCount, 2).getFormulas() : [];
+  var purchaseRecordReadMs = Date.now() - purchaseReadStartedAt;
+
+  var stores = {};
+  var orderNames = [];
+  function addStore_(raw) {
+    var name = purchaseUpper_(raw);
+    if (!name || name === 'TOTAL' || name === 'PROCESSING' ||
+        name === 'STORE' || name === '공급업체' ||
+        !purchaseStoreAllowed_(name, access.stores)) return null;
+    if (!stores[name]) {
+      stores[name] = { name: name, spent: null, budget: null, invoiced: null, processing: null };
+      orderNames.push(name);
+    }
+    return stores[name];
+  }
+
+  // Fixed J3:M12 summary: J store, K invoiced, L (unused), M spent.
+  var summaryRows = sh.getRange('J3:M12').getValues();
+  summaryRows.forEach(function (row) {
+    var item = addStore_(row[0]);
+    if (!item) return;
+    item.invoiced = purchaseNumeric_(row[1]);
+    item.spent = purchaseNumeric_(row[3]);
+  });
+
+  // Budget store/value pairs are confined to AO2:BF2.
+  var budgetRow = sh.getRange('AO2:BF2').getValues()[0];
+  for (var b = 0; b < budgetRow.length - 1; b++) {
+    var rawStore = String(budgetRow[b] || '').trim();
+    var amount = purchaseNumeric_(budgetRow[b + 1]);
+    if (!rawStore || amount === null || /^(TOTAL|PROCESSING)$/i.test(rawStore)) continue;
+    var budgetItem = addStore_(rawStore);
+    if (budgetItem && budgetItem.budget === null) budgetItem.budget = amount;
+  }
+
+  var cards = [];
+  var missingSheetLinks = [];
+  var processingByStore = {};
+  for (var r = 0; r < rows.length; r++) {
+    var raw = rows[r], shown = displayRows[r];
+    if (!String(shown[0] || '').trim()) continue;
+
+    // C is the actual store; B is the delivery address and can say JBS.
+    var shipTo = purchaseUpper_(shown[1]);
+    var cardStore = String(shown[2] || '').trim() || String(shown[1] || '').trim();
+    var storeItem = addStore_(cardStore);
+    // Never expose a card, link, or subtotal for a disallowed store.
+    if (!storeItem) continue;
+
+    var invoice = String(shown[5] || '').trim();
+    var hasInvoice = invoice !== '';
+    if (hasInvoice && shipTo === 'JBS' && !/^JBS\b/i.test(invoice)) invoice = 'JBS ' + invoice;
+    var poUrl = purchaseLink_(links[r][0], formulas[r][0], shown[4]);
+    var invoiceUrl = purchaseLink_(links[r][1], formulas[r][1], shown[5]);
+    var needsPO = !!String(shown[4] || '').trim() && !poUrl;
+    var needsInvoice = hasInvoice && !invoiceUrl;
+    if (needsPO || needsInvoice) {
+      missingSheetLinks.push({
+        rowNumber: r + 3, cardIndex: cards.length,
+        needsPO: needsPO, needsInvoice: needsInvoice
+      });
+    }
+    if (!hasInvoice) {
+      processingByStore[storeItem.name] = (processingByStore[storeItem.name] || 0) + 1;
+    }
+    cards.push({
+      id: sheetName + '-' + String(r + 3),
+      store: storeItem.name,
+      date: String(shown[0] || '').trim(),
+      vendor: String(shown[3] || '').trim(),
+      po: String(shown[4] || '').trim(),
+      poUrl: poUrl,
+      invoice: invoice,
+      invoiceUrl: invoiceUrl,
+      total: purchaseNumeric_(raw[7]) || 0,
+      invoiceIssued: hasInvoice
+    });
+  }
+
+  // Processing counts are computed only from authorized cards.
+  orderNames.forEach(function (name) {
+    stores[name].processing = processingByStore[name] || 0;
+  });
+  if (missingSheetLinks.length) {
+    var sheetLinks = purchaseLinksFromApi_(PURCHASE_SOURCE_ID_, sheetName,
+      missingSheetLinks.map(function (item) { return item.rowNumber; }));
+    missingSheetLinks.forEach(function (item) {
+      var found = sheetLinks[item.rowNumber] || {};
+      if (item.needsPO && found.poUrl) cards[item.cardIndex].poUrl = found.poUrl;
+      if (item.needsInvoice && found.invoiceUrl) cards[item.cardIndex].invoiceUrl = found.invoiceUrl;
+    });
+  }
+
+  console.log('PURCHASE_READ ' + JSON.stringify({
+    department: department,
+    sheetName: sheetName,
+    lastPurchaseRow: recordCount ? lastRow : 2,
+    recordCount: recordCount,
+    returnedCardCount: cards.length,
+    recordReadMs: purchaseRecordReadMs,
+    totalMs: Date.now() - purchaseStartedAt
+  }));
+  return {
+    ok: true, configured: true, month: month, department: department,
+    sheetName: sheetName,
+    allowedDepartments: access.sheets.slice(),
+    stores: orderNames.map(function (name) { return stores[name]; }),
+    cards: cards
+  };
 }

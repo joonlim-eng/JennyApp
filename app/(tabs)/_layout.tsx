@@ -10,7 +10,7 @@ import { SymbolView } from 'expo-symbols';
 import { useApp } from '@/context/AppContext';
 
 // IMPORTANT: iOS 26 uses NativeTabs for native tabs with liquid glass support.
-function NativeTabLayout({ isAdmin }: { isAdmin: boolean }) {
+function NativeTabLayout({ isAdmin, canPurchase }: { isAdmin: boolean; canPurchase: boolean }) {
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
@@ -25,6 +25,10 @@ function NativeTabLayout({ isAdmin }: { isAdmin: boolean }) {
         <Icon sf={{ default: 'cart', selected: 'cart.fill' }} />
         <Label>CART</Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="purchase" hidden={!canPurchase}>
+        <Icon sf={{ default: 'doc.text.magnifyingglass', selected: 'doc.text.magnifyingglass' }} />
+        <Label>PURCHASE</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings" hidden={!isAdmin}>
         <Icon sf={{ default: 'gearshape', selected: 'gearshape.fill' }} />
         <Label>SETTINGS</Label>
@@ -33,7 +37,7 @@ function NativeTabLayout({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-function ClassicTabLayout({ isAdmin }: { isAdmin: boolean }) {
+function ClassicTabLayout({ isAdmin, canPurchase }: { isAdmin: boolean; canPurchase: boolean }) {
   const colors = useColors();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -108,6 +112,19 @@ function ClassicTabLayout({ isAdmin }: { isAdmin: boolean }) {
         }}
       />
       <Tabs.Screen
+        name="purchase"
+        options={{
+          href: canPurchase ? undefined : null,
+          title: 'PURCHASE',
+          tabBarIcon: ({ color }) =>
+            isIOS ? (
+              <SymbolView name="doc.text.magnifyingglass" tintColor={color} size={24} />
+            ) : (
+              <Feather name="search" size={22} color={color} />
+            ),
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           href: isAdmin ? undefined : null,
@@ -125,10 +142,22 @@ function ClassicTabLayout({ isAdmin }: { isAdmin: boolean }) {
 }
 
 export default function TabLayout() {
-  const { session } = useApp();
-  const isAdmin = session?.role === 'master'; // SETTINGS 탭은 MASTER 전용
+  const { session, purchaseAccess } = useApp();
+  const isMaster = session?.role === 'master';
+  const isAdmin = isMaster; // SETTINGS 탭은 MASTER 전용
+
+  // PURCHASE tab requires a verified USERS G/H permission from the server.
+  // STAFF is always denied, even if G/H contains values.
+  const canPurchase = isMaster || Boolean(
+  session?.role === 'admin' &&
+  purchaseAccess &&
+  purchaseAccess.email === session?.email?.trim().toLowerCase() &&
+  purchaseAccess.departments.length > 0 &&
+  purchaseAccess.stores.length > 0
+);
+
   if (isLiquidGlassAvailable()) {
-    return <NativeTabLayout isAdmin={isAdmin} />;
+    return <NativeTabLayout isAdmin={isAdmin} canPurchase={canPurchase} />;
   }
-  return <ClassicTabLayout isAdmin={isAdmin} />;
+  return <ClassicTabLayout isAdmin={isAdmin} canPurchase={canPurchase} />;
 }

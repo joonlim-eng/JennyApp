@@ -31,7 +31,7 @@ export default function CartScreen() {
         return p ? { product: p, opt: c.opt } : null;
       })
       .filter(Boolean) as { product: Product; opt?: string }[];
-  }, [app.cart]);
+  }, [app.cart, app.findByUpc]);
 
   const store = app.stores.find((s) => s.id === app.selectedStoreId);
   const vendor = app.vendors.find((v) => v.id === app.selectedVendorId);

@@ -82,36 +82,37 @@ export default function HomeScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: c('home.bg', colors.background) }]}>
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: topPad + 16 }]} showsVerticalScrollIndicator={false}>
-        
-        <View style={styles.header}>
-          <View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={[styles.brand, { color: c('home.brandColor', colors.primary), fontSize: 20 * fs }]} onPress={handleCheckVersion}>
-                {app.settings.appTitle}
-              </Text>
-              {checkingVersion && <ActivityIndicator size="small" color={colors.primary} />}
-            </View>
-            <Text style={[styles.userEmail, { color: colors.mutedForeground, fontSize: 12 * fs }]}>{app.session?.email}</Text>
+    <View style={[styles.container, { backgroundColor: c('home.bg', colors.background), paddingTop: topPad }]}>
+      
+      <View style={[styles.header, { paddingHorizontal: 16, paddingTop: 0 }]}>
+        <View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[styles.brand, { color: c('home.brandColor', colors.primary), fontSize: 20 * fs }]} onPress={handleCheckVersion}>
+              {app.settings.appTitle}
+            </Text>
+            {checkingVersion && <ActivityIndicator size="small" color={colors.primary} />}
           </View>
-
-          {gifUri && (
-            <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 8 }}>
-              <Image source={{ uri: gifUri }} style={{ height: 45
-                , maxWidth: '100%', aspectRatio: gifAspectRatio }} resizeMode="contain" />
-            </View>
-          )}
-
-          <View style={styles.headerActions}>
-            <Pressable onPress={handleSync} disabled={syncing} style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.5 }]} testID="sync-now">
-              {syncing ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <Feather name="refresh-cw" size={20} color={colors.mutedForeground} />}
-            </Pressable>
-            <Pressable onPress={app.logout} style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.5 }]} testID="logout">
-              <Feather name="log-out" size={20} color={colors.mutedForeground} />
-            </Pressable>
-          </View>
+          <Text style={[styles.userEmail, { color: colors.mutedForeground, fontSize: 12 * fs }]}>{app.session?.email}</Text>
         </View>
+
+        {gifUri && (
+          <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', paddingHorizontal: 8 }}>
+            <Image source={{ uri: gifUri }} style={{ height: 45
+              , maxWidth: '100%', aspectRatio: gifAspectRatio }} resizeMode="contain" />
+          </View>
+        )}
+
+        <View style={styles.headerActions}>
+          <Pressable onPress={handleSync} disabled={syncing} style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.5 }]} testID="sync-now">
+            {syncing ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <Feather name="refresh-cw" size={20} color={colors.mutedForeground} />}
+          </Pressable>
+          <Pressable onPress={app.logout} style={({ pressed }) => [styles.logoutBtn, pressed && { opacity: 0.5 }]} testID="logout">
+            <Feather name="log-out" size={20} color={colors.mutedForeground} />
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={[styles.scroll, { paddingTop: 0 }]}>
 
         <Pressable
           onPress={handleTotalPress}
@@ -150,7 +151,7 @@ export default function HomeScreen() {
             onChange={(id) => guardedChange('vendor', id)}
             testID="select-vendor"
           />
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
             <Pressable
               onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
               style={({ pressed }) => [{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12, backgroundColor: colors.departmentToggle ?? colors.primary }, pressed && { opacity: 0.8 }]}
@@ -179,7 +180,7 @@ export default function HomeScreen() {
           <ActionButton icon={<Feather name="save" size={22} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.saveLabel', 'SAVE')} color={c('home.saveColor', colors.saveBtn ?? colors.primary)} borderColor={colors.saveBtnBorder} textColor={colors.actionBtnText} onPress={handleSave} testID="btn-save" />
           <ActionButton icon={<Feather name="download" size={22} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.loadLabel', 'ORDER LOAD')} color={c('home.loadColor', colors.loadBtn ?? colors.accent)} textColor={colors.actionBtnText} onPress={handleLoad} testID="btn-load" />
         </View>
-      </ScrollView>
+      </View>
 
       {/* 분리된 모달 컴포넌트들 */}
       <ProgressModal visible={sending} title="Sending Order…" subtitle="Please wait. Do not close the app." />
@@ -533,7 +534,7 @@ const styles = StyleSheet.create({
   totalLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontFamily: 'Inter_600SemiBold', letterSpacing: 2 },
   totalValue: { color: '#fff', fontFamily: 'Inter_700Bold', marginVertical: 4 },
   totalSub: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontFamily: 'Inter_400Regular' },
-  section: { marginBottom: 16 },
+  section: { marginBottom: 12 },
   sectionLabel: { fontSize: 11, fontFamily: 'Inter_700SemiBold', letterSpacing: 1.2, marginBottom: 6 },
   toggleRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 2 },
   toggleLabel: { fontFamily: 'Inter_500Medium' },
@@ -593,8 +594,8 @@ function SendConfirmModal({
                       marginBottom: 24,
                       backgroundColor: colors.background
                     }}
-                    placeholder="Optional message to vendor..."
-                    placeholderTextColor={colors.muted}
+                    placeholder=""
+                    placeholderTextColor='#E0E0E0'
                     value={me2ve}
                     onChangeText={setMe2ve}
                   />
