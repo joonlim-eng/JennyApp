@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -33,6 +33,11 @@ const PURCHASE_STORES = [
   'MESQUITE',
   'JBS',
 ] as const;
+// TOTAL view: only these accounts. Always the first item in dropdown / cycle.
+const TOTAL_STORE = 'TOTAL';
+const TOTAL_VIEW_EMAILS: readonly string[] = ['samhong@jennybs.com', 'joonlim@jennybs.com'];
+// Rows shown in the TOTAL table (JBS excluded).
+const TOTAL_ROW_STORES: readonly string[] = PURCHASE_STORES.filter((s) => s !== 'JBS');
 type StoreSummary = {
   name: string;
   spent: number | null;
@@ -71,6 +76,36 @@ const money = (value: number | null | undefined) =>
 const count = (value: number | null | undefined) =>
   value == null || !Number.isFinite(value) ? '—' : String(value);
 
+// Big dollars; "$" and cents at ~60% size, baseline-aligned, one weight lighter.
+// Colors are passed in from the theme only.
+function MoneyText({
+  value,
+  size,
+  color,
+  style,
+}: {
+  value: number | null | undefined;
+  size: number;
+  color: string;
+  style?: React.ComponentProps<typeof Text>['style'];
+}) {
+  const base = { color, fontSize: size, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums' as const] };
+  if (value == null || !Number.isFinite(value)) {
+    return <Text style={[base, style]} numberOfLines={1}>—</Text>;
+  }
+  const small = { fontSize: Math.round(size * 0.6), fontFamily: 'Inter_600SemiBold' };
+  const [whole, cents] = Math.abs(value).toFixed(2).split('.');
+  const dollars = Number(whole).toLocaleString('en-US');
+  return (
+    <Text style={[base, style]} numberOfLines={1} adjustsFontSizeToFit>
+      {value < 0 ? '-' : ''}
+      <Text style={small}>$</Text>
+      {dollars}
+      <Text style={small}>.{cents}</Text>
+    </Text>
+  );
+}
+
 export default function PurchaseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -88,16 +123,30 @@ export default function PurchaseScreen() {
 
   const allowed = isMaster || (session?.role === 'admin' &&
   allowedDepartments.length > 0 && !!purchaseAccess?.stores.length);
+  const canViewTotal = allowed &&
+    TOTAL_VIEW_EMAILS.includes(session?.email?.trim().toLowerCase() ?? '');
   const allowedStores = useMemo<string[]>(() => {
-    if (isMaster) return [...PURCHASE_STORES];
-    if (!allowed || !purchaseAccess) return [];
-    return purchaseAccess.stores.includes('ALL')
+    let stores: string[];
+    if (isMaster) stores = [...PURCHASE_STORES];
+    else if (!allowed || !purchaseAccess) stores = [];
+    else stores = purchaseAccess.stores.includes('ALL')
       ? [...PURCHASE_STORES]
       : purchaseAccess.stores;
-  }, [isMaster, allowed, purchaseAccess]);
+    return canViewTotal && stores.length ? [TOTAL_STORE, ...stores] : stores;
+  }, [isMaster, allowed, purchaseAccess, canViewTotal]);
 
   const [department, setDepartment] = useState<Department>('GM');
-  const [storeName, setStoreName] = useState<string>('LEWISVILLE');
+  const [storeName, setStoreName] = useState<string>(() =>
+    canViewTotal ? TOTAL_STORE : 'LEWISVILLE');
+
+  // TOTAL accounts open on TOTAL once (also when access arrives after mount).
+  const totalDefaultAppliedRef = useRef(false);
+  useEffect(() => {
+    if (canViewTotal && !totalDefaultAppliedRef.current) {
+      totalDefaultAppliedRef.current = true;
+      setStoreName(TOTAL_STORE);
+    }
+  }, [canViewTotal]);
   const [storePickerOpen, setStorePickerOpen] = useState(false);
   const [result, setResult] = useState<PurchaseResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -187,6 +236,29 @@ export default function PurchaseScreen() {
   const remaining = currentStore?.budget != null && currentStore.spent != null
     ? currentStore.budget - currentStore.spent
     : null;
+
+  // TOTAL view reuses the same stores[].budget (AO:BF) and stores[].spent (M).
+  const isTotal = storeName === TOTAL_STORE;
+  const totalRows = useMemo(() => TOTAL_ROW_STORES.map((name) => {
+    const s = result?.stores?.find((x) => x.name.trim().toUpperCase() === name) ?? null;
+    const budget = s?.budget ?? null;
+    const spent = s?.spent ?? null;
+    return {
+      name,
+      budget,
+      spent,
+      remaining: budget != null && spent != null ? budget - spent : null,
+    };
+  }), [result]);
+  const totalSum = useMemo(() => {
+    const sum = (key: 'budget' | 'spent' | 'remaining') => {
+      const values = totalRows
+        .map((r) => r[key])
+        .filter((v): v is number => v != null && Number.isFinite(v));
+      return values.length ? values.reduce((a, b) => a + b, 0) : null;
+    };
+    return { budget: sum('budget'), spent: sum('spent'), remaining: sum('remaining') };
+  }, [totalRows]);
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const openLink = async (url: string) => {
@@ -301,6 +373,7 @@ export default function PurchaseScreen() {
             </Pressable>
           </View>
         </View>
+        {!isTotal && (<>
         <View style={[styles.budgetCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.budgetMetric}>
             <Text style={[styles.metricLabel, { color: colors.mutedForeground }]}>SPENT</Text>
@@ -324,6 +397,7 @@ export default function PurchaseScreen() {
             <Text style={[styles.counterValue, { color: colors.foreground }]}>{count(result?.configured === true ? missing.length : null)}</Text>
           </View>
         </View>
+        </>)}
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
@@ -339,7 +413,69 @@ export default function PurchaseScreen() {
             {result.message || 'This department has no purchase source sheet yet.'}
           </Text>
         )}
-        {!loading && !failure && result?.configured !== false && (
+        {!loading && !failure && result?.configured !== false && isTotal && (
+          <>
+            <View style={[styles.totalHero, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.totalHeroLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>
+                TOTAL REMAINING
+              </Text>
+              <MoneyText
+                value={totalSum.remaining}
+                size={30 * fs}
+                color={totalSum.remaining != null && totalSum.remaining < 0 ? colors.destructive : colors.foreground}
+              />
+              <View style={[styles.totalHeroDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.totalHeroSubRow}>
+                <View style={styles.totalHeroSub}>
+                  <Text style={[styles.totalHeroSubLabel, { color: colors.mutedForeground, fontSize: 10 * fs }]}>BUDGET</Text>
+                  <MoneyText value={totalSum.budget} size={17 * fs} color={colors.foreground} />
+                </View>
+                <View style={styles.totalHeroSub}>
+                  <Text style={[styles.totalHeroSubLabel, { color: colors.mutedForeground, fontSize: 10 * fs }]}>SPENT</Text>
+                  <MoneyText value={totalSum.spent} size={17 * fs} color={colors.foreground} />
+                </View>
+              </View>
+            </View>
+
+            <View style={[styles.totalTable, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={[styles.totalRow, styles.totalHeadRow, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.totalStoreCell, styles.totalHeadText, { color: colors.mutedForeground, fontSize: 10 * fs }]}> </Text>
+                {['BUDGET', 'SPENT', 'REMAINING'].map((label) => (
+                  <Text
+                    key={label}
+                    style={[styles.totalMoneyCell, styles.totalHeadText, { color: colors.mutedForeground, fontSize: 10 * fs }]}
+                    numberOfLines={1}
+                  >
+                    {label}
+                  </Text>
+                ))}
+              </View>
+              {totalRows.map((row, index) => (
+                <View
+                  key={row.name}
+                  style={[
+                    styles.totalRow,
+                    { borderBottomColor: colors.border },
+                    index === totalRows.length - 1 && styles.totalLastRow,
+                  ]}
+                >
+                  <Text style={[styles.totalStoreCell, { color: colors.foreground, fontSize: 13 * fs }]} numberOfLines={1}>
+                    {row.name}
+                  </Text>
+                  <MoneyText value={row.budget} size={16 * fs} color={colors.foreground} style={styles.totalMoneyCell} />
+                  <MoneyText value={row.spent} size={16 * fs} color={colors.foreground} style={styles.totalMoneyCell} />
+                  <MoneyText
+                    value={row.remaining}
+                    size={16 * fs}
+                    color={row.remaining != null && row.remaining < 0 ? colors.destructive : colors.foreground}
+                    style={styles.totalMoneyCell}
+                  />
+                </View>
+              ))}
+            </View>
+          </>
+        )}
+        {!loading && !failure && result?.configured !== false && !isTotal && (
           <>
             {issued.length > 0 && issued.map(renderOrder)}
             <View style={styles.sectionRow}>
@@ -440,4 +576,17 @@ const styles = StyleSheet.create({
   empty: { paddingVertical: 28, textAlign: 'center', fontFamily: 'Inter_400Regular' },
   spinner: { marginVertical: 28 },
   notice: { padding: 16, borderWidth: 1, borderRadius: 10, marginBottom: 12 },
+  totalHero: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, marginBottom: 10 },
+  totalHeroLabel: { fontFamily: 'Inter_600SemiBold', letterSpacing: 1, marginBottom: 2 },
+  totalHeroDivider: { height: 1, marginVertical: 12 },
+  totalHeroSubRow: { flexDirection: 'row', gap: 12 },
+  totalHeroSub: { flex: 1, gap: 2 },
+  totalHeroSubLabel: { fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
+  totalTable: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 2 },
+  totalRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, gap: 6 },
+  totalHeadRow: { paddingVertical: 9 },
+  totalLastRow: { borderBottomWidth: 0 },
+  totalStoreCell: { flex: 1.15, fontFamily: 'Inter_600SemiBold' },
+  totalMoneyCell: { flex: 1, textAlign: 'right' },
+  totalHeadText: { fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
 });
