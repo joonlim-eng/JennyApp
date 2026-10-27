@@ -76,32 +76,36 @@ const money = (value: number | null | undefined) =>
 const count = (value: number | null | undefined) =>
   value == null || !Number.isFinite(value) ? '—' : String(value);
 
-// Big dollars; "$" and cents at ~60% size, baseline-aligned, one weight lighter.
-// Colors are passed in from the theme only.
+// Amount without "$", cents same size, tabular digits. Colors come from the theme only.
 function MoneyText({
   value,
   size,
   color,
+  weight = 'bold',
   style,
 }: {
   value: number | null | undefined;
   size: number;
   color: string;
+  weight?: 'bold' | 'regular';
   style?: React.ComponentProps<typeof Text>['style'];
 }) {
-  const base = { color, fontSize: size, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums' as const] };
+  const base = {
+    color,
+    fontSize: size,
+    fontFamily: weight === 'bold' ? 'Inter_700Bold' : 'Inter_500Medium',
+    fontVariant: ['tabular-nums' as const],
+  };
   if (value == null || !Number.isFinite(value)) {
     return <Text style={[base, style]} numberOfLines={1}>—</Text>;
   }
-  const small = { fontSize: Math.round(size * 0.6), fontFamily: 'Inter_600SemiBold' };
-  const [whole, cents] = Math.abs(value).toFixed(2).split('.');
-  const dollars = Number(whole).toLocaleString('en-US');
+  const text = `${value < 0 ? '-' : ''}${Math.abs(value).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
   return (
     <Text style={[base, style]} numberOfLines={1} adjustsFontSizeToFit>
-      {value < 0 ? '-' : ''}
-      <Text style={small}>$</Text>
-      {dollars}
-      <Text style={small}>.{cents}</Text>
+      {text}
     </Text>
   );
 }
@@ -414,31 +418,9 @@ export default function PurchaseScreen() {
           </Text>
         )}
         {!loading && !failure && result?.configured !== false && isTotal && (
-          <>
-            <View style={[styles.totalHero, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.totalHeroLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>
-                TOTAL REMAINING
-              </Text>
-              <MoneyText
-                value={totalSum.remaining}
-                size={30 * fs}
-                color={totalSum.remaining != null && totalSum.remaining < 0 ? colors.destructive : colors.foreground}
-              />
-              <View style={[styles.totalHeroDivider, { backgroundColor: colors.border }]} />
-              <View style={styles.totalHeroSubRow}>
-                <View style={styles.totalHeroSub}>
-                  <Text style={[styles.totalHeroSubLabel, { color: colors.mutedForeground, fontSize: 10 * fs }]}>BUDGET</Text>
-                  <MoneyText value={totalSum.budget} size={17 * fs} color={colors.foreground} />
-                </View>
-                <View style={styles.totalHeroSub}>
-                  <Text style={[styles.totalHeroSubLabel, { color: colors.mutedForeground, fontSize: 10 * fs }]}>SPENT</Text>
-                  <MoneyText value={totalSum.spent} size={17 * fs} color={colors.foreground} />
-                </View>
-              </View>
-            </View>
-
-            <View style={[styles.totalTable, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={[styles.totalRow, styles.totalHeadRow, { borderBottomColor: colors.border }]}>
+          <View style={styles.totalTable}>
+            <View style={[styles.totalHead, { backgroundColor: colors.card, borderBottomColor: colors.mutedForeground }]}>
+              <View style={styles.totalGridRow}>
                 <Text style={[styles.totalStoreCell, styles.totalHeadText, { color: colors.mutedForeground, fontSize: 10 * fs }]}> </Text>
                 {['BUDGET', 'SPENT', 'REMAINING'].map((label) => (
                   <Text
@@ -450,30 +432,37 @@ export default function PurchaseScreen() {
                   </Text>
                 ))}
               </View>
-              {totalRows.map((row, index) => (
-                <View
-                  key={row.name}
-                  style={[
-                    styles.totalRow,
-                    { borderBottomColor: colors.border },
-                    index === totalRows.length - 1 && styles.totalLastRow,
-                  ]}
-                >
-                  <Text style={[styles.totalStoreCell, { color: colors.foreground, fontSize: 13 * fs }]} numberOfLines={1}>
-                    {row.name}
-                  </Text>
-                  <MoneyText value={row.budget} size={16 * fs} color={colors.foreground} style={styles.totalMoneyCell} />
-                  <MoneyText value={row.spent} size={16 * fs} color={colors.foreground} style={styles.totalMoneyCell} />
-                  <MoneyText
-                    value={row.remaining}
-                    size={16 * fs}
-                    color={row.remaining != null && row.remaining < 0 ? colors.destructive : colors.foreground}
-                    style={styles.totalMoneyCell}
-                  />
-                </View>
-              ))}
+              <View style={[styles.totalGridRow, styles.totalSumRow]}>
+                <Text style={[styles.totalStoreCell, { color: colors.foreground, fontSize: 14 * fs, fontFamily: 'Inter_700Bold' }]} numberOfLines={1}>
+                  TOTAL
+                </Text>
+                <MoneyText value={totalSum.budget} size={16 * fs} color={colors.foreground} style={styles.totalMoneyCell} />
+                <MoneyText value={totalSum.spent} size={16 * fs} color={colors.foreground} style={styles.totalMoneyCell} />
+                <MoneyText
+                  value={totalSum.remaining}
+                  size={17 * fs}
+                  color={totalSum.remaining != null && totalSum.remaining < 0 ? colors.destructive : colors.foreground}
+                  style={styles.totalMoneyCell}
+                />
+              </View>
             </View>
-          </>
+            {totalRows.map((row) => (
+              <View key={row.name} style={[styles.totalGridRow, styles.totalRow, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.totalStoreCell, { color: colors.mutedForeground, fontSize: 13 * fs }]} numberOfLines={1}>
+                  {row.name}
+                </Text>
+                <MoneyText value={row.budget} size={15 * fs} color={colors.foreground} weight="regular" style={styles.totalMoneyCell} />
+                <MoneyText value={row.spent} size={15 * fs} color={colors.foreground} weight="regular" style={styles.totalMoneyCell} />
+                <MoneyText
+                  value={row.remaining}
+                  size={15 * fs}
+                  color={row.remaining != null && row.remaining < 0 ? colors.destructive : colors.foreground}
+                  weight="regular"
+                  style={styles.totalMoneyCell}
+                />
+              </View>
+            ))}
+          </View>
         )}
         {!loading && !failure && result?.configured !== false && !isTotal && (
           <>
@@ -576,17 +565,14 @@ const styles = StyleSheet.create({
   empty: { paddingVertical: 28, textAlign: 'center', fontFamily: 'Inter_400Regular' },
   spinner: { marginVertical: 28 },
   notice: { padding: 16, borderWidth: 1, borderRadius: 10, marginBottom: 12 },
-  totalHero: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, marginBottom: 10 },
-  totalHeroLabel: { fontFamily: 'Inter_600SemiBold', letterSpacing: 1, marginBottom: 2 },
-  totalHeroDivider: { height: 1, marginVertical: 12 },
-  totalHeroSubRow: { flexDirection: 'row', gap: 12 },
-  totalHeroSub: { flex: 1, gap: 2 },
-  totalHeroSubLabel: { fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
-  totalTable: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 2 },
-  totalRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth, gap: 6 },
-  totalHeadRow: { paddingVertical: 9 },
-  totalLastRow: { borderBottomWidth: 0 },
-  totalStoreCell: { flex: 1.15, fontFamily: 'Inter_600SemiBold' },
+  // TOTAL view: one 4-column grid, full screen width.
+  // Negative margins cancel scrollContent padding (12) for this view only.
+  totalTable: { marginHorizontal: -12, marginTop: -12 },
+  totalHead: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12, borderBottomWidth: 1 },
+  totalGridRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  totalSumRow: { marginTop: 4, alignItems: 'baseline' },
+  totalRow: { paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth },
+  totalStoreCell: { flex: 1, fontFamily: 'Inter_600SemiBold' },
   totalMoneyCell: { flex: 1, textAlign: 'right' },
   totalHeadText: { fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
 });
