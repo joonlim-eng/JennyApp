@@ -204,6 +204,9 @@ export default function HomeScreen() {
 
         {/* GM / PRODUCT 토글 */}
         <View style={styles.gmRow}>
+          <Text style={[styles.themeTag, { color: colors.mutedForeground, fontSize: 11 * fs }]}>
+            {`Q${Math.floor(new Date().getMonth() / 3) + 1} · ${(app.appearance['global.theme'] || app.settings.theme || '').toUpperCase()}`}
+          </Text>
           <Pressable
             onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
             style={({ pressed }) => [styles.gmBtn, { backgroundColor: colors.departmentToggle ?? colors.primary }, pressed && { opacity: 0.8 }]}
@@ -735,7 +738,8 @@ const styles = StyleSheet.create({
   bannerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)' },
   bannerDotOn: { width: 16, backgroundColor: '#fff' },
   // GM
-  gmRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', height: 36, paddingHorizontal: 16 },
+  gmRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 36, paddingLeft: 8, paddingRight: 16 },
+  themeTag: { fontFamily: 'Inter_600SemiBold', letterSpacing: 1.2 },
   gmBtn: { height: 28, paddingHorizontal: 14, borderRadius: 14, justifyContent: 'center' },
   // STORE / VENDOR
   selectGroup: { paddingHorizontal: 8, gap: 5 },

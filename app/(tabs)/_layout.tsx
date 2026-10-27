@@ -26,7 +26,7 @@ function NativeTabLayout({ isAdmin, canPurchase }: { isAdmin: boolean; canPurcha
         <Label>CART</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="purchase" hidden={!canPurchase}>
-        <Icon sf={{ default: 'doc.text.magnifyingglass', selected: 'doc.text.magnifyingglass' }} />
+        <Icon sf={{ default: 'receipt', selected: 'receipt.fill' }} />
         <Label>PURCHASE</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings" hidden={!isAdmin}>
@@ -118,9 +118,9 @@ function ClassicTabLayout({ isAdmin, canPurchase }: { isAdmin: boolean; canPurch
           title: 'PURCHASE',
           tabBarIcon: ({ color }) =>
             isIOS ? (
-              <SymbolView name="doc.text.magnifyingglass" tintColor={color} size={24} />
+              <SymbolView name="receipt" tintColor={color} size={24} />
             ) : (
-              <Feather name="search" size={22} color={color} />
+              <MaterialCommunityIcons name="receipt-text-outline" size={22} color={color} />
             ),
         }}
       />
