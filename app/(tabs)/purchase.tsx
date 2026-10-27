@@ -434,18 +434,18 @@ export default function PurchaseScreen() {
                 <Text style={[styles.totalLegendText, { color: colors.mutedForeground, fontSize: 10 * fs }]}>REMAINING</Text>
               </View>
               <View style={[styles.totalLine, { marginTop: 4 }]}>
-                <Text style={[styles.totalName, { color: colors.foreground, fontSize: 15 * fs }]} numberOfLines={1}>
+                <Text style={[styles.totalName, { color: colors.foreground, fontSize: 16 * fs }]} numberOfLines={1}>
                   TOTAL
                 </Text>
                 <MoneyText
                   value={totalSum.remaining}
-                  size={22 * fs}
+                  size={20 * fs}
                   color={totalSum.remaining != null && totalSum.remaining < 0 ? colors.destructive : colors.foreground}
                   style={styles.totalAmount}
                 />
               </View>
               <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
-                {plain(totalSum.spent)} / {plain(totalSum.budget)}
+                {plain(totalSum.spent)} / <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(totalSum.budget)}</Text>
               </Text>
             </View>
 
@@ -462,7 +462,7 @@ export default function PurchaseScreen() {
                   ]}
                 >
                   <View style={styles.totalLine}>
-                    <Text style={[styles.totalName, { color: colors.foreground, fontSize: 13 * fs }]} numberOfLines={1}>
+                    <Text style={[styles.totalName, { color: colors.foreground, fontSize: 16 * fs }]} numberOfLines={1}>
                       {row.name}
                     </Text>
                     <MoneyText
@@ -473,7 +473,7 @@ export default function PurchaseScreen() {
                     />
                   </View>
                   <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
-                    {plain(row.spent)} / {plain(row.budget)}
+                    {plain(row.spent)} / <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(row.budget)}</Text>
                   </Text>
                 </View>
               ))}
@@ -588,8 +588,8 @@ const styles = StyleSheet.create({
   totalSummary: { paddingTop: 8, paddingBottom: 10 },
   totalLegend: { flexDirection: 'row', justifyContent: 'space-between' },
   totalLegendText: { fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
-  totalLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  totalName: { fontFamily: 'Inter_600SemiBold', flexShrink: 0 },
+  totalLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  totalName: { fontFamily: 'Inter_400Regular', flexShrink: 0 },
   totalAmount: { flexShrink: 1, marginLeft: 12, textAlign: 'right' },
   totalSub: { fontFamily: 'Inter_500Medium', fontVariant: ['tabular-nums'], marginTop: 2 },
   totalItem: { paddingVertical: 12 },

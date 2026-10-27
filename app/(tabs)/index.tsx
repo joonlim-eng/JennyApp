@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,6 +16,8 @@ import {
   KeyboardAvoidingView,
   Keyboard, 
   TouchableWithoutFeedback,
+  Animated,
+  useWindowDimensions,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -24,6 +26,17 @@ import { Feather, MaterialCommunityIcons } from '@/components/AppIcon';
 import { useColors } from '@/hooks/useColors';
 import { useApp, useFontScale, calcPrice } from '@/context/AppContext';
 import Dropdown from '@/components/Dropdown';
+import type { SavedCart } from '@/context/AppContext';
+
+const BANNER_IDS = [
+  '1_7tBzi3mbz6hxm1iieW1hvoV5qN9NcwJ', // Banner 01
+  '1TmXrMlFMeKc2tcdR0vVhTutcgWGpq5qg', // Banner 02
+  '19lBTiadrvldStg_qPsnwiNHraBcdkhEx', // Banner 03
+  '18oGYgJrxz5qHd7zBzQbzckzhd6W-Yteu', // Banner 04
+  '17u9CwelFE1rYhVPkOaJLn2pmVD7jYah9', // Banner 05
+];
+const bannerUrl = (id: string) => `https://drive.google.com/thumbnail?id=${id}&sz=w1600`;
+const BANNER_INTERVAL = 3500; // 자동 넘김 간격(ms)
 
 function notify(title: string, msg: string) {
   if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
@@ -81,6 +94,48 @@ export default function HomeScreen() {
     ]);
   };
 
+  // --- SAVED 드롭다운: 내 저장 주문 전부(스토어/벤더 무관), 최신순 ---
+  const savedTotal = (s: SavedCart) => s.items.reduce((sum, it) => {
+    const p = app.findByUpc(it.upc);
+    const code = p?.itemCode ?? '';
+    const parts = code.split('/');
+    const defaultOpt = parts.length > 1 ? parts[1].trim() : '';
+    const activeOpt = it.opt || defaultOpt;
+    const base = p?.cost ?? 0;
+    const price = activeOpt ? calcPrice(base, code, it.opt) : base;
+    return sum + Number(price) * it.qty;
+  }, 0);
+
+  const fmtSavedDate = (iso: string) => {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm}`;
+  };
+
+  const savedTime = (s: SavedCart) => { const t = Date.parse(s.createdAt); return isNaN(t) ? 0 : t; };
+  const savedOptions = app.savedCarts
+    .filter((s) => s.userEmail === app.session?.email)
+    .sort((a, b) => savedTime(b) - savedTime(a))
+    .map((s) => {
+      const storeName = app.stores.find((x) => x.id === s.storeId)?.name ?? '';
+      const vendorName = app.vendors.find((x) => x.id === s.vendorId)?.name ?? '';
+      const sublabel = [storeName, vendorName, fmtSavedDate(s.createdAt), `${s.items.length} items`, `$${savedTotal(s).toFixed(2)}`]
+        .filter(Boolean)
+        .join(' · ');
+      return { value: s.id, label: s.name, sublabel };
+    });
+
+  // 배너 높이 = TOTAL 띠 높이 × 2 (TOTAL 띠를 실제로 재서 맞춤)
+  const [bandH, setBandH] = useState(0);
+
+  const totalColor = c('home.totalCardColor', colors.totalCard ?? colors.primary);
+  const loadColor = c('home.loadColor', colors.loadBtn ?? colors.accent);
+  const unitCount = app.cart.reduce((s, it) => s + it.qty, 0);
+  const cartEmpty = app.cart.length === 0;
+  const onBandText = colors.totalLabel ? { color: colors.totalLabel } : null;
+
   return (
     <View style={[styles.container, { backgroundColor: c('home.bg', colors.background), paddingTop: topPad }]}>
       
@@ -112,74 +167,102 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <View style={[styles.scroll, { paddingTop: 0 }]}>
+      <View style={styles.body}>
 
+        {/* TOTAL: 화면 폭 전체 띠 */}
         <Pressable
           onPress={handleTotalPress}
-          style={({ pressed }) => [styles.totalCard, { backgroundColor: c('home.totalCardColor', colors.totalCard ?? colors.primary) }, pressed && { opacity: 0.95 }]}
+          onLayout={(e) => setBandH(Math.round(e.nativeEvent.layout.height))}
+          style={({ pressed }) => [styles.totalBand, { backgroundColor: totalColor }, pressed && { opacity: 0.95 }]}
         >
-          <Text style={[styles.totalLabel, colors.totalLabel ? { color: colors.totalLabel } : null]}>{c('home.totalLabel', 'TOTAL')}</Text>
-          <Text style={[styles.totalValue, { fontSize: 36 * fs }]}>${app.cartTotal.toFixed(2)}</Text>
-          <Text style={[styles.totalSub, colors.totalLabel ? { color: colors.totalLabel } : null]}>
-            {app.cart.length} items · {app.cart.reduce((s, c) => s + c.qty, 0)} units
-          </Text>
-        </Pressable>
-
-        <View style={styles.section}>
-          <View style={[styles.toggleRow, { justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 0, marginTop: 0 }]}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 0 }]}>{c('home.storeLabel', 'SELECT STORE')}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={[styles.toggleLabel, { color: colors.foreground, fontSize: 12.5 * fs }]}>{c('home.shipLabel', 'SHIP TO JBS')}</Text>
-              <Switch value={app.shipToJBS} onValueChange={app.setShipToJBS} trackColor={{ true: colors.accent, false: colors.border }} thumbColor="#fff" testID="ship-to-jbs" />
+          <View>
+            <Text style={[styles.totalLabel, onBandText]}>{c('home.totalLabel', 'TOTAL')}</Text>
+            <Text style={[styles.totalValue, { fontSize: 34 * fs }]}>${app.cartTotal.toFixed(2)}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end', gap: 6 }}>
+            <Text style={[styles.totalSub, { fontSize: 13 * fs }, onBandText]}>
+              {app.cart.length} items · {unitCount} units
+            </Text>
+            <View style={styles.shipPill}>
+              <Text style={[styles.shipText, { fontSize: 11 * fs }, onBandText]}>{c('home.shipLabel', 'SHIP TO JBS')}</Text>
+              <Switch
+                value={app.shipToJBS}
+                onValueChange={app.setShipToJBS}
+                trackColor={{ true: 'rgba(255,255,255,0.55)', false: 'rgba(0,0,0,0.18)' }}
+                ios_backgroundColor="rgba(0,0,0,0.18)"
+                thumbColor="#fff"
+                style={styles.shipSwitch}
+                testID="ship-to-jbs"
+              />
             </View>
           </View>
-          <Dropdown
-            placeholder="Select store"
-            options={app.stores.map((s) => ({ value: s.id, label: s.name, sublabel: `${s.address}` }))}
-            value={app.selectedStoreId}
-            onChange={(id) => guardedChange('store', id)}
-            testID="select-store"
-          />
+        </Pressable>
+
+        {/* 배너: 화면 폭 꽉 채움, 자동 + 손으로 넘김 */}
+        <BannerCarousel height={bandH * 2} />
+
+        {/* GM / PRODUCT 토글 */}
+        <View style={styles.gmRow}>
+          <Pressable
+            onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
+            style={({ pressed }) => [styles.gmBtn, { backgroundColor: colors.departmentToggle ?? colors.primary }, pressed && { opacity: 0.8 }]}
+            testID="department-toggle"
+          >
+            <Text style={{ color: '#fff', fontFamily: 'Inter_700Bold', fontSize: 12 * fs }}>{app.department}</Text>
+          </Pressable>
         </View>
 
-        <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{c('home.vendorLabel', 'SELECT VENDOR')}</Text>
-          <Dropdown
-            placeholder="Select vendor"
-            options={app.vendors.map((v) => ({ value: v.id, label: v.name, sublabel: `${v.salesPerson} · ${v.email}` }))}
-            value={app.selectedVendorId}
-            onChange={(id) => guardedChange('vendor', id)}
-            testID="select-vendor"
-          />
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 }}>
-            <Pressable
-              onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
-              style={({ pressed }) => [{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 12, backgroundColor: colors.departmentToggle ?? colors.primary }, pressed && { opacity: 0.8 }]}
-              testID="department-toggle"
-            >
-              <Text style={{ color: '#fff', fontFamily: 'Inter_600SemiBold', fontSize: 12.5 * fs }}>{app.department}</Text>
-            </Pressable>
+        {/* STORE / VENDOR 블록 */}
+        <View style={styles.selectGroup}>
+          <View style={styles.selRow}>
+            <Text style={[styles.selLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{c('home.storeLabel', 'STORE')}</Text>
+            <View style={{ flex: 1 }}>
+              <Dropdown
+                placeholder="Select store"
+                options={app.stores.map((s) => ({ value: s.id, label: s.name, sublabel: `${s.address}` }))}
+                value={app.selectedStoreId}
+                onChange={(id) => guardedChange('store', id)}
+                testID="select-store"
+              />
+            </View>
+          </View>
+          <View style={styles.selRow}>
+            <Text style={[styles.selLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{c('home.vendorLabel', 'VENDOR')}</Text>
+            <View style={{ flex: 1 }}>
+              <Dropdown
+                placeholder="Select vendor"
+                options={app.vendors.map((v) => ({ value: v.id, label: v.name, sublabel: `${v.salesPerson} · ${v.email}` }))}
+                value={app.selectedVendorId}
+                onChange={(id) => guardedChange('vendor', id)}
+                testID="select-vendor"
+              />
+            </View>
+          </View>
+          <View style={styles.selRow}>
+            <Text style={[styles.selLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{c('home.savedLabel', 'SAVED')}</Text>
+            <View style={{ flex: 1 }}>
+              <Dropdown
+                placeholder="Select saved order"
+                options={savedOptions}
+                value={savedSelection}
+                onChange={setSavedSelection}
+                onDeleteOption={(id) => { app.deleteSavedCart(id); if (savedSelection === id) setSavedSelection(null); }}
+                testID="saved-list"
+              />
+            </View>
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>{c('home.savedLabel', 'SAVED LIST')}</Text>
-          <Dropdown
-            placeholder="Select saved order"
-            options={app.savedCarts.filter((s) => s.userEmail === app.session?.email).map((s) => ({ value: s.id, label: s.name }))}
-            value={savedSelection}
-            onChange={setSavedSelection}
-            onDeleteOption={(id) => { app.deleteSavedCart(id); if (savedSelection === id) setSavedSelection(null); }}
-            testID="saved-list"
-          />
+        {/* 버튼 4개: SAVED와 하단 탭 사이 세로 가운데 */}
+        <View style={styles.buttonArea}>
+        <View style={styles.buttonGrid}>
+          <ActionButton icon={<Feather name="send" size={20} color={colors.sendBtnText ?? colors.actionBtnIcon ?? '#fff'} />} label={c('home.sendLabel', 'SEND')} color={c('home.sendColor', colors.sendBtn ?? colors.accent)} borderColor={colors.sendBtnBorder} textColor={colors.sendBtnText ?? colors.actionBtnText} onPress={handleSend} badge={app.cart.length} testID="btn-send" />
+          <ActionButton icon={<MaterialCommunityIcons name="microsoft-excel" size={20} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.exportLabel', 'EXPORT')} color={c('home.exportColor', colors.exportBtn ?? colors.success)} textColor={colors.actionBtnText} onPress={handleExportOptions} testID="btn-export" />
+          <ActionButton icon={<Feather name="save" size={20} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.saveLabel', 'SAVE')} color={c('home.saveColor', colors.saveBtn ?? colors.primary)} borderColor={colors.saveBtnBorder} textColor={colors.actionBtnText} onPress={handleSave} testID="btn-save" />
+          <ActionButton icon={<Feather name="download" size={20} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.loadLabel', 'LOAD')} color={loadColor} textColor={colors.actionBtnText} onPress={handleLoad} highlight={!!savedSelection} ringColor={loadColor} badge={savedOptions.length} testID="btn-load" />
+        </View>
         </View>
 
-        <View style={styles.buttonGrid}>
-          <ActionButton icon={<Feather name="send" size={22} color={colors.sendBtnText ?? colors.actionBtnIcon ?? '#fff'} />} label={c('home.sendLabel', 'SEND')} color={c('home.sendColor', colors.sendBtn ?? colors.accent)} borderColor={colors.sendBtnBorder} textColor={colors.sendBtnText ?? colors.actionBtnText} onPress={handleSend} testID="btn-send" />
-          <ActionButton icon={<MaterialCommunityIcons name="microsoft-excel" size={22} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.exportLabel', 'EXPORT / IMPORT')} color={c('home.exportColor', colors.exportBtn ?? colors.success)} textColor={colors.actionBtnText} onPress={handleExportOptions} testID="btn-export" />
-          <ActionButton icon={<Feather name="save" size={22} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.saveLabel', 'SAVE')} color={c('home.saveColor', colors.saveBtn ?? colors.primary)} borderColor={colors.saveBtnBorder} textColor={colors.actionBtnText} onPress={handleSave} testID="btn-save" />
-          <ActionButton icon={<Feather name="download" size={22} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.loadLabel', 'ORDER LOAD')} color={c('home.loadColor', colors.loadBtn ?? colors.accent)} textColor={colors.actionBtnText} onPress={handleLoad} testID="btn-load" />
-        </View>
       </View>
 
       {/* 분리된 모달 컴포넌트들 */}
@@ -251,8 +334,19 @@ function ImportTabsModal({ visible, onClose, loadingTabs, importingTab, tabList,
   );
 }
 
+// 버튼 색을 조금 어둡게 만든 색 (키캡 받침용). hex가 아니면 반투명 검정 사용
+function shadeColor(color: string, amount = 0.28) {
+  let hex = color.trim();
+  if (/^#[0-9a-f]{3}$/i.test(hex)) hex = '#' + hex.slice(1).split('').map((ch) => ch + ch).join('');
+  const m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(hex);
+  if (!m) return 'rgba(0,0,0,0.25)';
+  const n = parseInt(m[1], 16);
+  const f = (v: number) => Math.max(0, Math.round(v * (1 - amount)));
+  return `rgb(${f((n >> 16) & 255)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
+
 function ActionButton({
-  icon, label, color, borderColor, textColor, onPress, testID,
+  icon, label, color, borderColor, textColor, onPress, testID, highlight, ringColor, dim, badge,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -261,17 +355,122 @@ function ActionButton({
   textColor?: string;
   onPress: () => void;
   testID?: string;
+  highlight?: boolean; // SAVED에서 주문을 고르면 LOAD에 링 표시
+  ringColor?: string;
+  dim?: boolean; // 지금 누를 일이 없으면 흐리게 (누르면 기존 안내가 뜸)
+  badge?: number; // 오른쪽 위 숫자 배지 (0이면 숨김)
 }) {
   const fs = useFontScale();
+  const colors = useColors();
+  const press = useRef(new Animated.Value(0)).current;
+  const animate = (to: number) =>
+    Animated.timing(press, { toValue: to, duration: 90, useNativeDriver: true }).start();
+  const translateY = press.interpolate({ inputRange: [0, 1], outputRange: [0, 3] });
+  const iconScale = press.interpolate({ inputRange: [0, 1], outputRange: [1, 1.14] });
+
   return (
-    <Pressable
-      onPress={onPress}
-      testID={testID}
-      style={({ pressed }) => [styles.actionBtn, { backgroundColor: color }, borderColor ? { borderWidth: StyleSheet.hairlineWidth, borderColor } : null, pressed && { opacity: 0.8 }]}
-    >
-      {icon}
-      <Text style={[styles.actionLabel, { fontSize: 13 * fs }, textColor ? { color: textColor } : null]}>{label}</Text>
-    </Pressable>
+    <View style={[styles.actionWrap, dim && styles.actionDim]}>
+      {highlight && <View pointerEvents="none" style={[styles.actionRing, { borderColor: ringColor ?? color }]} />}
+      <View pointerEvents="none" style={[styles.actionBase, { backgroundColor: shadeColor(color) }]} />
+      <Animated.View style={{ transform: [{ translateY }] }}>
+        <Pressable
+          onPress={onPress}
+          onPressIn={() => animate(1)}
+          onPressOut={() => animate(0)}
+          testID={testID}
+          style={[
+            styles.actionBtn,
+            { backgroundColor: color },
+            borderColor ? { borderWidth: StyleSheet.hairlineWidth, borderColor } : null,
+          ]}
+        >
+          <Animated.View style={[styles.actionIcon, { transform: [{ scale: iconScale }] }]}>{icon}</Animated.View>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+            style={[styles.actionLabel, { fontSize: 11 * fs }, textColor ? { color: textColor } : null]}
+          >
+            {label}
+          </Text>
+        </Pressable>
+      </Animated.View>
+      {badge ? (
+        <View pointerEvents="none" style={[styles.actionBadge, { borderColor: colors.background }]}>
+          <Text style={[styles.actionBadgeText, { color: colors.foreground, fontSize: 11 * fs }]}>{badge > 99 ? '99+' : badge}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function BannerCarousel({ height }: { height: number }) {
+  const { width } = useWindowDimensions();
+  const [failed, setFailed] = useState<string[]>([]);
+  const ids = BANNER_IDS.filter((id) => !failed.includes(id));
+  const [index, setIndex] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const indexRef = useRef(0);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stop = () => {
+    if (timer.current) { clearInterval(timer.current); timer.current = null; }
+  };
+  const start = () => {
+    stop();
+    if (ids.length < 2) return;
+    timer.current = setInterval(() => {
+      const next = (indexRef.current + 1) % ids.length;
+      scrollRef.current?.scrollTo({ x: next * width, animated: true });
+      indexRef.current = next;
+      setIndex(next);
+    }, BANNER_INTERVAL);
+  };
+
+  useEffect(() => {
+    if (indexRef.current >= ids.length) { indexRef.current = 0; setIndex(0); }
+    start();
+    return stop;
+  }, [ids.length, width]);
+
+  if (ids.length === 0 || height <= 0) return null; // 그림이 없거나 TOTAL 높이 측정 전이면 숨김
+
+  const syncIndex = (x: number) => {
+    const i = Math.max(0, Math.min(ids.length - 1, Math.round(x / width)));
+    if (i !== indexRef.current) { indexRef.current = i; setIndex(i); }
+  };
+
+  return (
+    <View style={{ width, height, marginTop: 4 }}>
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        scrollEventThrottle={32}
+        onScroll={(e) => syncIndex(e.nativeEvent.contentOffset.x)}
+        onScrollBeginDrag={stop}
+        onScrollEndDrag={start}
+        onMomentumScrollEnd={(e) => { syncIndex(e.nativeEvent.contentOffset.x); start(); }}
+      >
+        {ids.map((id) => (
+          <Image
+            key={id}
+            source={{ uri: bannerUrl(id) }}
+            style={{ width, height }}
+            resizeMode="cover"
+            onError={() => setFailed((f) => (f.includes(id) ? f : [...f, id]))}
+          />
+        ))}
+      </ScrollView>
+      {ids.length > 1 && (
+        <View pointerEvents="none" style={styles.bannerDots}>
+          {ids.map((id, i) => (
+            <View key={id} style={[styles.bannerDot, i === index && styles.bannerDotOn]} />
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -416,7 +615,7 @@ function useOrderAndCartManager() {
       const finalItemCode = activeOpt ? `${baseCode} / ${activeOpt}` : baseCode;
       const baseCost = p?.cost ?? 0;
       const finalPrice = activeOpt ? calcPrice(baseCost, originalItemCode, c.opt) : baseCost;
-      return { upc: c.upc, itemCode: finalItemCode, description: p?.description ?? '', cost: finalPrice, qty: c.qty, amount: finalPrice * c.qty };
+      return { upc: c.upc, itemCode: finalItemCode, description: p?.description ?? '', cost: finalPrice, qty: c.qty, amount: Number(finalPrice) * c.qty };
     });
     return {
       v: app.appVersion, type: 'order', store: store?.name ?? '',
@@ -524,23 +723,47 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 14, fontWeight: '500' },
   sendingTitle: { fontWeight: '700' },
   sendingSub: { textAlign: 'center' },
-  scroll: { paddingHorizontal: 16, paddingBottom: 120 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  body: { flex: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   brand: { fontFamily: 'Inter_700Bold', letterSpacing: 1.5 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   userEmail: { fontFamily: 'Inter_400Regular', marginTop: 2 },
   logoutBtn: { padding: 8 },
-  totalCard: { borderRadius: 16, padding: 20, alignItems: 'center', marginBottom: 20 },
-  totalLabel: { color: 'rgba(255,255,255,0.6)', fontSize: 12, fontFamily: 'Inter_600SemiBold', letterSpacing: 2 },
-  totalValue: { color: '#fff', fontFamily: 'Inter_700Bold', marginVertical: 4 },
-  totalSub: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontFamily: 'Inter_400Regular' },
+  // TOTAL 띠
+  totalBand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  totalLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 3 },
+  totalValue: { color: '#fff', fontFamily: 'Inter_700Bold', marginTop: 2 },
+  totalSub: { color: 'rgba(255,255,255,0.85)', fontFamily: 'Inter_500Medium' },
+  shipPill: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 30, paddingLeft: 11, paddingRight: 2, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.18)' },
+  shipText: { color: '#fff', fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
+  shipSwitch: { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] },
+  // 배너
+  bannerDots: { position: 'absolute', right: 10, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.38)' },
+  bannerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)' },
+  bannerDotOn: { width: 16, backgroundColor: '#fff' },
+  // GM
+  gmRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', height: 36, paddingHorizontal: 16 },
+  gmBtn: { height: 28, paddingHorizontal: 14, borderRadius: 14, justifyContent: 'center' },
+  // STORE / VENDOR
+  selectGroup: { paddingHorizontal: 8, gap: 5 },
+  selRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  selLabel: { width: 52, fontFamily: 'Inter_600SemiBold', letterSpacing: 1.2 },
   section: { marginBottom: 12 },
   sectionLabel: { fontSize: 11, fontFamily: 'Inter_700SemiBold', letterSpacing: 1.2, marginBottom: 6 },
   toggleRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 2 },
   toggleLabel: { fontFamily: 'Inter_500Medium' },
-  buttonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 4 },
-  actionBtn: { flexBasis: '48%', flexGrow: 1, borderRadius: 12, paddingVertical: 18, alignItems: 'center', gap: 6 },
-  actionLabel: { color: '#fff', fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
+  // 버튼 4개
+  buttonArea: { flex: 1, justifyContent: 'center', paddingTop: 6, paddingBottom: 34 },
+  buttonGrid: { flexDirection: 'row', gap: 8, paddingHorizontal: 16 },
+  actionWrap: { flex: 1, paddingBottom: 4 },
+  actionDim: { opacity: 0.42 },
+  actionRing: { position: 'absolute', top: -4, left: -4, right: -4, bottom: -4, borderRadius: 20, borderWidth: 2 },
+  actionBase: { position: 'absolute', top: 4, left: 0, right: 0, bottom: 0, borderRadius: 16 },
+  actionBtn: { height: 88, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  actionIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.35)' },
+  actionLabel: { color: '#fff', fontFamily: 'Inter_700Bold', letterSpacing: 0.8, paddingHorizontal: 4 },
+  actionBadge: { position: 'absolute', top: -7, right: -5, minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, borderWidth: 2, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
+  actionBadgeText: { fontFamily: 'Inter_700Bold' },
 });
 
 function SendConfirmModal({
