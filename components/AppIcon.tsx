@@ -46,6 +46,15 @@ const FEATHER: Record<string, React.ReactNode> = {
       <Line x1={12} y1={15} x2={12} y2={3} />
     </>
   ),
+    'file-text': (
+    <>
+      <Path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <Polyline points="14 2 14 8 20 8" />
+      <Line x1={16} y1={13} x2={8} y2={13} />
+      <Line x1={16} y1={17} x2={8} y2={17} />
+      <Polyline points="10 9 9 9 8 9" />
+    </>
+  ),
   home: (
     <>
       <Path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -206,6 +215,14 @@ const MCI: Record<string, React.ReactNode> = {
       <Path d="M2 7V3h4M18 3h4v4M22 17v4h-4M6 21H2v-4" />
       <Circle cx={11.5} cy={11.5} r={4.5} />
       <Line x1={15} y1={15} x2={18} y2={18} />
+    </>
+  ),
+  'receipt-text-outline': (
+    <>
+      <Path d="M4 3l2 1.5L8 3l2 1.5L12 3l2 1.5L16 3l2 1.5L20 3v18l-2-1.5L16 21l-2-1.5L12 21l-2-1.5L8 21l-2-1.5L4 21z" />
+      <Line x1={8} y1={9} x2={16} y2={9} />
+      <Line x1={8} y1={12.5} x2={16} y2={12.5} />
+      <Line x1={8} y1={16} x2={13} y2={16} />
     </>
   ),
   'microsoft-excel': (

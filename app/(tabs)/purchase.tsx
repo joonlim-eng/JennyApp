@@ -30,6 +30,7 @@ const PURCHASE_STORES = [
   'IRVING',
   'LEWISVILLE',
   'MANSFIELD',
+  'MEADOW',
   'MESQUITE',
   'JBS',
 ] as const;
@@ -250,7 +251,7 @@ export default function PurchaseScreen() {
     ? currentStore.budget - currentStore.spent
     : null;
 
-  // TOTAL view reuses the same stores[].budget (AO:BF) and stores[].spent (M).
+  // TOTAL view reuses the same stores[].budget (AQ:BJ) and stores[].spent (M).
   const isTotal = storeName === TOTAL_STORE;
   const totalRows = useMemo(() => TOTAL_ROW_STORES.map((name) => {
     const s = result?.stores?.find((x) => x.name.trim().toUpperCase() === name) ?? null;
@@ -430,7 +431,7 @@ export default function PurchaseScreen() {
           <View style={styles.totalWrap}>
             <View style={[styles.totalCard, styles.totalSummary, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.totalLegend}>
-                <Text style={[styles.totalLegendText, { color: colors.mutedForeground, fontSize: 10 * fs }]}>SPENT / BUDGET</Text>
+                <Text style={[styles.totalLegendText, { color: colors.mutedForeground, fontSize: 10 * fs }]}>BUDGET / REMAINING</Text>
                 <Text style={[styles.totalLegendText, { color: colors.mutedForeground, fontSize: 10 * fs }]}>REMAINING</Text>
               </View>
               <View style={[styles.totalLine, { marginTop: 4 }]}>
@@ -445,7 +446,7 @@ export default function PurchaseScreen() {
                 />
               </View>
               <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
-                {plain(totalSum.spent)} / <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(totalSum.budget)}</Text>
+                <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(totalSum.budget)}</Text> / {plain(totalSum.remaining)}
               </Text>
             </View>
 
@@ -473,7 +474,7 @@ export default function PurchaseScreen() {
                     />
                   </View>
                   <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
-                    {plain(row.spent)} / <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(row.budget)}</Text>
+                    <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(row.budget)}</Text> / {plain(row.remaining)}
                   </Text>
                 </View>
               ))}
