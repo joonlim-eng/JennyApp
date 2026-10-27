@@ -177,7 +177,7 @@ export default function HomeScreen() {
         >
           <View>
             <Text style={[styles.totalLabel, onBandText]}>{c('home.totalLabel', 'TOTAL')}</Text>
-            <Text style={[styles.totalValue, { fontSize: 34 * fs }]}>${app.cartTotal.toFixed(2)}</Text>
+            <Text style={[styles.totalValue, { fontSize: 30 * fs }]}>${app.cartTotal.toFixed(2)}</Text>
           </View>
           <View style={{ alignItems: 'flex-end', gap: 6 }}>
             <Text style={[styles.totalSub, { fontSize: 13 * fs }, onBandText]}>
@@ -384,15 +384,7 @@ function ActionButton({
             borderColor ? { borderWidth: StyleSheet.hairlineWidth, borderColor } : null,
           ]}
         >
-          <Animated.View style={[styles.actionIcon, { transform: [{ scale: iconScale }] }]}>{icon}</Animated.View>
-          <Text
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-            style={[styles.actionLabel, { fontSize: 11 * fs }, textColor ? { color: textColor } : null]}
-          >
-            {label}
-          </Text>
+          <Animated.View style={{ transform: [{ scale: iconScale }] }}>{icon}</Animated.View>
         </Pressable>
       </Animated.View>
       {badge ? (
@@ -730,7 +722,7 @@ const styles = StyleSheet.create({
   userEmail: { fontFamily: 'Inter_400Regular', marginTop: 2 },
   logoutBtn: { padding: 8 },
   // TOTAL 띠
-  totalBand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14 },
+  totalBand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },
   totalLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 3 },
   totalValue: { color: '#fff', fontFamily: 'Inter_700Bold', marginTop: 2 },
   totalSub: { color: 'rgba(255,255,255,0.85)', fontFamily: 'Inter_500Medium' },
@@ -759,7 +751,7 @@ const styles = StyleSheet.create({
   actionDim: { opacity: 0.42 },
   actionRing: { position: 'absolute', top: -4, left: -4, right: -4, bottom: -4, borderRadius: 20, borderWidth: 2 },
   actionBase: { position: 'absolute', top: 4, left: 0, right: 0, bottom: 0, borderRadius: 16 },
-  actionBtn: { height: 88, borderRadius: 16, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  actionBtn: { aspectRatio: 1, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   actionIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.35)' },
   actionLabel: { color: '#fff', fontFamily: 'Inter_700Bold', letterSpacing: 0.8, paddingHorizontal: 4 },
   actionBadge: { position: 'absolute', top: -7, right: -5, minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, borderWidth: 2, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
