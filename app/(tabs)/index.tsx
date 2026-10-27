@@ -35,8 +35,9 @@ const BANNER_IDS = [
   '18oGYgJrxz5qHd7zBzQbzckzhd6W-Yteu', // Banner 04
   '17u9CwelFE1rYhVPkOaJLn2pmVD7jYah9', // Banner 05
 ];
-const bannerUrl = (id: string) => `https://drive.google.com/thumbnail?id=${id}&sz=w1600`;
-const BANNER_INTERVAL = 3500; // 자동 넘김 간격(ms)
+const BANNER_BUST = Date.now(); //TIME APPLIED
+const bannerUrl = (id: string) => `https://drive.google.com/thumbnail?id=${id}&sz=w1600&t=${BANNER_BUST}`;
+const BANNER_INTERVAL = 5500; // INTERVAL
 
 function notify(title: string, msg: string) {
   if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
