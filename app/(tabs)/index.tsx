@@ -404,36 +404,63 @@ function BannerCarousel({ height }: { height: number }) {
   const { width } = useWindowDimensions();
   const [failed, setFailed] = useState<string[]>([]);
   const ids = BANNER_IDS.filter((id) => !failed.includes(id));
-  const [index, setIndex] = useState(0);
+  const n = ids.length;            // 배너 개수 = BANNER_IDS 줄 수 (실패한 건 제외)
+  const loop = n > 1;
+  // 무한 루프 줄: [마지막 복사본] 1 2 … n [첫 장 복사본]
+  const slides = loop ? [ids[n - 1], ...ids, ids[0]] : ids;
+  const SLIDE_MS = 450;            // 자동 슬라이드 끝난 뒤 순간이동까지 대기
+
+  const [index, setIndex] = useState(0);          // 점 표시용 (진짜 배너 번호 0..n-1)
   const scrollRef = useRef<ScrollView>(null);
-  const indexRef = useRef(0);
+  const pageRef = useRef(loop ? 1 : 0);           // 지금 보이는 칸 (복사본 포함 0..n+1)
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const jumpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 칸 번호 → 진짜 배너 번호
+  const realOf = (page: number) => (loop ? (page - 1 + n) % n : page);
+
+  const goTo = (page: number, animated: boolean) => {
+    scrollRef.current?.scrollTo({ x: page * width, animated });
+    pageRef.current = page;
+    setIndex(realOf(page));
+  };
+
+  // 복사본 칸에 있으면 같은 그림의 진짜 칸으로 애니메이션 없이 순간이동
+  const fixEdge = () => {
+    if (!loop) return;
+    if (pageRef.current >= n + 1) goTo(1, false);
+    else if (pageRef.current <= 0) goTo(n, false);
+  };
 
   const stop = () => {
     if (timer.current) { clearInterval(timer.current); timer.current = null; }
+    if (jumpTimer.current) { clearTimeout(jumpTimer.current); jumpTimer.current = null; }
   };
   const start = () => {
     stop();
-    if (ids.length < 2) return;
+    if (!loop) return;
     timer.current = setInterval(() => {
-      const next = (indexRef.current + 1) % ids.length;
-      scrollRef.current?.scrollTo({ x: next * width, animated: true });
-      indexRef.current = next;
-      setIndex(next);
+      if (pageRef.current >= n + 1) goTo(1, false); // 혹시 복사본에 남아 있으면 먼저 정리
+      goTo(pageRef.current + 1, true);               // 항상 앞으로만
+      if (jumpTimer.current) clearTimeout(jumpTimer.current);
+      jumpTimer.current = setTimeout(fixEdge, SLIDE_MS);
     }, BANNER_INTERVAL);
   };
 
   useEffect(() => {
-    if (indexRef.current >= ids.length) { indexRef.current = 0; setIndex(0); }
+    const first = loop ? 1 : 0;
+    pageRef.current = first;
+    setIndex(0);
+    scrollRef.current?.scrollTo({ x: first * width, animated: false });
     start();
     return stop;
-  }, [ids.length, width]);
+  }, [n, width]);
 
-  if (ids.length === 0 || height <= 0) return null; // 그림이 없거나 TOTAL 높이 측정 전이면 숨김
+  if (n === 0 || height <= 0) return null; // 그림이 없거나 TOTAL 높이 측정 전이면 숨김
 
-  const syncIndex = (x: number) => {
-    const i = Math.max(0, Math.min(ids.length - 1, Math.round(x / width)));
-    if (i !== indexRef.current) { indexRef.current = i; setIndex(i); }
+  const syncPage = (x: number) => {
+    const p = Math.max(0, Math.min(slides.length - 1, Math.round(x / width)));
+    if (p !== pageRef.current) { pageRef.current = p; setIndex(realOf(p)); }
   };
 
   return (
@@ -444,14 +471,15 @@ function BannerCarousel({ height }: { height: number }) {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={32}
-        onScroll={(e) => syncIndex(e.nativeEvent.contentOffset.x)}
+        onContentSizeChange={() => scrollRef.current?.scrollTo({ x: pageRef.current * width, animated: false })}
+        onScroll={(e) => syncPage(e.nativeEvent.contentOffset.x)}
         onScrollBeginDrag={stop}
         onScrollEndDrag={start}
-        onMomentumScrollEnd={(e) => { syncIndex(e.nativeEvent.contentOffset.x); start(); }}
+        onMomentumScrollEnd={(e) => { syncPage(e.nativeEvent.contentOffset.x); fixEdge(); start(); }}
       >
-        {ids.map((id) => (
+        {slides.map((id, i) => (
           <Image
-            key={id}
+            key={`${i}-${id}`}
             source={{ uri: bannerUrl(id) }}
             style={{ width, height }}
             resizeMode="cover"
@@ -459,7 +487,7 @@ function BannerCarousel({ height }: { height: number }) {
           />
         ))}
       </ScrollView>
-      {ids.length > 1 && (
+      {loop && (
         <View pointerEvents="none" style={styles.bannerDots}>
           {ids.map((id, i) => (
             <View key={id} style={[styles.bannerDot, i === index && styles.bannerDotOn]} />

@@ -287,17 +287,18 @@ export default function PurchaseScreen() {
       style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
     >
       <View style={styles.cardTitleRow}>
-        <Text style={[styles.date, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{order.date}</Text>
-        <Text style={[styles.vendor, { color: colors.foreground, fontSize: 13 * fs }]} numberOfLines={2}>
+        <Text style={[styles.vendor, { color: colors.foreground, fontSize: 14 * fs }]} numberOfLines={1}>
           {order.vendor || '—'}
         </Text>
+        <Text style={[styles.date, { color: colors.mutedForeground, fontSize: 14 * fs }]}>{order.date}</Text>
+        <MoneyText value={order.total} size={14 * fs} color={colors.foreground} style={styles.total} />
       </View>
       <View style={[styles.divider, { backgroundColor: colors.border }]} />
       <View style={styles.detailRow}>
-        <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>PO SHEET</Text>
+        <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 13 * fs }]}>PO</Text>
         <Pressable onPress={() => void openLink(order.poUrl)} disabled={!order.poUrl} style={styles.detailValue}>
           <Text
-            style={{ color: order.poUrl ? colors.accent : colors.foreground, fontSize: 12 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.poUrl ? 'underline' : 'none' }}
+            style={{ color: order.poUrl ? colors.accent : colors.foreground, fontSize: 15 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.poUrl ? 'underline' : 'none' }}
             numberOfLines={2}
           >
             {order.po || '—'}
@@ -305,19 +306,15 @@ export default function PurchaseScreen() {
         </Pressable>
       </View>
       <View style={styles.detailRow}>
-        <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>INVOICE</Text>
+        <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 13 * fs }]}>INVOICE</Text>
         <Pressable onPress={() => void openLink(order.invoiceUrl)} disabled={!order.invoiceUrl} style={styles.detailValue}>
           <Text
-            style={{ color: order.invoiceUrl ? colors.accent : colors.foreground, fontSize: 12 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.invoiceUrl ? 'underline' : 'none' }}
+            style={{ color: order.invoiceUrl ? colors.accent : colors.foreground, fontSize: 15 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.invoiceUrl ? 'underline' : 'none' }}
             numberOfLines={2}
           >
             {order.invoice || '—'}
           </Text>
         </Pressable>
-      </View>
-      <View style={styles.detailRow}>
-        <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>TOTAL</Text>
-        <Text style={[styles.total, { color: colors.foreground, fontSize: 13 * fs }]}>{money(order.total)}</Text>
       </View>
     </View>
   );
@@ -431,7 +428,7 @@ export default function PurchaseScreen() {
           <View style={styles.totalWrap}>
             <View style={[styles.totalCard, styles.totalSummary, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.totalLegend}>
-                <Text style={[styles.totalLegendText, { color: colors.mutedForeground, fontSize: 10 * fs }]}>BUDGET / REMAINING</Text>
+                <Text style={[styles.totalLegendText, { color: colors.mutedForeground, fontSize: 10 * fs }]}>BUDGET / SPENT</Text>
                 <Text style={[styles.totalLegendText, { color: colors.mutedForeground, fontSize: 10 * fs }]}>REMAINING</Text>
               </View>
               <View style={[styles.totalLine, { marginTop: 4 }]}>
@@ -446,7 +443,7 @@ export default function PurchaseScreen() {
                 />
               </View>
               <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
-                <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(totalSum.budget)}</Text> / {plain(totalSum.remaining)}
+                <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(totalSum.budget)}</Text> / {plain(totalSum.spent)}
               </Text>
             </View>
 
@@ -474,7 +471,7 @@ export default function PurchaseScreen() {
                     />
                   </View>
                   <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
-                    <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(row.budget)}</Text> / {plain(row.remaining)}
+                    <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(row.budget)}</Text> / {plain(row.spent)} 
                   </Text>
                 </View>
               ))}
@@ -569,14 +566,14 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 12, paddingBottom: 100 },
   card: { paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 10, marginBottom: 8 },
-  cardTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 },
-  date: { fontFamily: 'Inter_500Medium' },
-  vendor: { fontFamily: 'Inter_700Bold', textAlign: 'right', flex: 1 },
-  divider: { height: 1, marginVertical: 4 },
-  detailRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 2 },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  date: { fontFamily: 'Inter_500Medium', flexShrink: 0 },
+  vendor: { fontFamily: 'Inter_700Bold', flexShrink: 1 },
+  divider: { height: 1, marginVertical: 6 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3 },
   detailLabel: { width: 78, fontFamily: 'Inter_500Medium' },
   detailValue: { flex: 1, alignItems: 'flex-start' },
-  total: { fontFamily: 'Inter_700Bold' },
+  total: { marginLeft: 'auto', flexShrink: 0 },
   sectionRow: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8, paddingBottom: 12, alignItems: 'center' },
   sectionTitle: { fontFamily: 'Inter_700Bold' },
   empty: { paddingVertical: 28, textAlign: 'center', fontFamily: 'Inter_400Regular' },
