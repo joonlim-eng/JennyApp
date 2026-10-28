@@ -406,15 +406,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    setPurchaseAccessState(null);
-
     // STAFF, missing login tokens, and blank settings can never obtain access.
     if (loading || !purchaseEmail || !purchaseToken || !purchaseScriptUrl ||
         (purchaseRole !== 'master' && purchaseRole !== 'admin')) {
+      setPurchaseAccessState(null);
       return () => { active = false; };
     }
 
     const fetchPurchaseAccess = async () => {
+      let receivedResponse = false;
+      let accessGranted = false;
       try {
         const params = [
           'action=purchaseAccess',
@@ -425,6 +426,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
+        receivedResponse = true;
 
         // Fail closed: only accept a complete, explicitly granted server ACL.
         if (json?.ok !== true || json.allowed !== true ||
@@ -454,9 +456,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             sessionKey: purchaseSessionKey,
             access: { email: purchaseEmail, departments, stores },
           });
+          accessGranted = true;
         }
       } catch {
-        // Server/network/invalid JSON errors must not reveal PURCHASE.
+        // Keep previously verified access during temporary connection errors.
+      } finally {
+        if (active && receivedResponse && !accessGranted) {
+          setPurchaseAccessState(null);
+        }
       }
     };
     void fetchPurchaseAccess();
