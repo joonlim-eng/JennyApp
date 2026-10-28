@@ -19,8 +19,6 @@ import { useColors } from '@/hooks/useColors';
 
 type Department = 'GM' | 'PRODUCT';
 
-// Independent fixed STORE choices for PURCHASE only. Do not synchronize with
-// the HOME/SCAN store selection and do not depend on the response's store list.
 const PURCHASE_STORES = [
   'ARLINGTON',
   'CARROLLTON',
@@ -166,6 +164,9 @@ export default function PurchaseScreen() {
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => { scrollRef.current?.scrollTo({ y: 0, animated: false }); }, [storeName]);
 
   // A single permitted department cannot be switched to another department.
   const effectiveDepartment: Department = allowedDepartments.includes(department)
@@ -287,18 +288,18 @@ export default function PurchaseScreen() {
       style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
     >
       <View style={styles.cardTitleRow}>
-        <Text style={[styles.vendor, { color: colors.foreground, fontSize: 14 * fs }]} numberOfLines={1}>
-          {order.vendor || '—'}
+        <Text style={styles.vendorLine} numberOfLines={2}>
+          <Text style={[styles.vendor, { color: colors.foreground, fontSize: 13 * fs }]}>{order.vendor || '—'}</Text>
+          <Text style={[styles.date, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{'  '}{order.date}</Text>
         </Text>
-        <Text style={[styles.date, { color: colors.mutedForeground, fontSize: 14 * fs }]}>{order.date}</Text>
-        <MoneyText value={order.total} size={14 * fs} color={colors.foreground} style={styles.total} />
+        <Text style={[styles.total, { color: colors.foreground, fontSize: 13 * fs }]}>{plain(order.total)}</Text>
       </View>
       <View style={[styles.divider, { backgroundColor: colors.border }]} />
       <View style={styles.detailRow}>
-        <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 13 * fs }]}>PO</Text>
+        <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 13 * fs }]}>PO SHEET</Text>
         <Pressable onPress={() => void openLink(order.poUrl)} disabled={!order.poUrl} style={styles.detailValue}>
           <Text
-            style={{ color: order.poUrl ? colors.accent : colors.foreground, fontSize: 15 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.poUrl ? 'underline' : 'none' }}
+            style={{ color: order.poUrl ? colors.accent : colors.foreground, fontSize: 14 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.poUrl ? 'underline' : 'none' }}
             numberOfLines={2}
           >
             {order.po || '—'}
@@ -309,7 +310,7 @@ export default function PurchaseScreen() {
         <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 13 * fs }]}>INVOICE</Text>
         <Pressable onPress={() => void openLink(order.invoiceUrl)} disabled={!order.invoiceUrl} style={styles.detailValue}>
           <Text
-            style={{ color: order.invoiceUrl ? colors.accent : colors.foreground, fontSize: 15 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.invoiceUrl ? 'underline' : 'none' }}
+            style={{ color: order.invoiceUrl ? colors.accent : colors.foreground, fontSize: 14 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.invoiceUrl ? 'underline' : 'none' }}
             numberOfLines={2}
           >
             {order.invoice || '—'}
@@ -323,8 +324,8 @@ export default function PurchaseScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <View style={styles.toolbar}>
+      <View style={[styles.header, isTotal && { paddingBottom: 8 }, { borderBottomColor: colors.border }]}>
+        <View style={[styles.toolbar, isTotal && { marginBottom: 0 }]}>
           <View style={styles.storeHeadingGroup}>
             <View style={styles.storeControls}>
               <Pressable
@@ -354,8 +355,8 @@ export default function PurchaseScreen() {
               </Pressable>
             </View>
             {!!result?.month && (
-              <Text style={[styles.month, { color: colors.mutedForeground, fontSize: 12 * fs }]}>
-                {result.month}
+              <Text style={[styles.month, isTotal && { marginTop: 6 }, { color: colors.mutedForeground, fontSize: 14 * fs }]}>
+                {result.month} {new Date().getFullYear()}
               </Text>
             )}
           </View>
@@ -411,7 +412,7 @@ export default function PurchaseScreen() {
         </>)}
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {loading && <ActivityIndicator size="large" color={colors.primary} style={styles.spinner} />}
         {!!failure && (
           <View style={[styles.notice, { borderColor: colors.destructive }]}>
@@ -449,14 +450,20 @@ export default function PurchaseScreen() {
 
             <View style={[styles.totalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               {totalRows.map((row, index) => (
-                <View
+                <Pressable
                   key={row.name}
-                  style={[
+                  onPress={() => setStoreName(row.name)}
+                  disabled={!allowedStores.includes(row.name)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${row.name}`}
+                  testID={`purchase-total-row-${row.name}`}
+                  style={({ pressed }) => [
                     styles.totalItem,
                     index < totalRows.length - 1 && {
                       borderBottomWidth: StyleSheet.hairlineWidth,
                       borderBottomColor: colors.border,
                     },
+                    pressed && [styles.totalItemPressed, { backgroundColor: colors.background }],
                   ]}
                 >
                   <View style={styles.totalLine}>
@@ -471,9 +478,9 @@ export default function PurchaseScreen() {
                     />
                   </View>
                   <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
-                    <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(row.budget)}</Text> / {plain(row.spent)} 
+                    <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(row.budget)}</Text> / {plain(row.spent)}
                   </Text>
-                </View>
+                </Pressable>
               ))}
             </View>
           </View>
@@ -566,21 +573,20 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: 12, paddingBottom: 100 },
   card: { paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 10, marginBottom: 8 },
-  cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  date: { fontFamily: 'Inter_500Medium', flexShrink: 0 },
-  vendor: { fontFamily: 'Inter_700Bold', flexShrink: 1 },
-  divider: { height: 1, marginVertical: 6 },
-  detailRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3 },
-  detailLabel: { width: 78, fontFamily: 'Inter_500Medium' },
+  cardTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 },
+  date: { fontFamily: 'Inter_500Medium' },
+  vendor: { fontFamily: 'Inter_700Bold' },
+  vendorLine: { flex: 1 },
+  divider: { height: 1, marginVertical: 4 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 2 },
+  detailLabel: { width: 90, fontFamily: 'Inter_500Medium' },
   detailValue: { flex: 1, alignItems: 'flex-start' },
-  total: { marginLeft: 'auto', flexShrink: 0 },
+  total: { fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] },
   sectionRow: { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8, paddingBottom: 12, alignItems: 'center' },
   sectionTitle: { fontFamily: 'Inter_700Bold' },
   empty: { paddingVertical: 28, textAlign: 'center', fontFamily: 'Inter_400Regular' },
   spinner: { marginVertical: 28 },
   notice: { padding: 16, borderWidth: 1, borderRadius: 10, marginBottom: 12 },
-  // TOTAL view: two cards (summary + stores), outer margin 6.
-  // Negative margins reduce scrollContent padding (12 -> 6) for this view only.
   totalWrap: { marginHorizontal: -6, marginTop: -6, gap: 6 },
   totalCard: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, overflow: 'hidden' },
   totalSummary: { paddingTop: 8, paddingBottom: 10 },
@@ -591,4 +597,5 @@ const styles = StyleSheet.create({
   totalAmount: { flexShrink: 1, marginLeft: 12, textAlign: 'right' },
   totalSub: { fontFamily: 'Inter_500Medium', fontVariant: ['tabular-nums'], marginTop: 2 },
   totalItem: { paddingVertical: 12 },
+  totalItemPressed: { marginHorizontal: -12, paddingHorizontal: 12 },
 });

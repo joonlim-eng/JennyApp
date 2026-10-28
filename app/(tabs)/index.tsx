@@ -170,20 +170,27 @@ export default function HomeScreen() {
 
       <View style={styles.body}>
 
-        {/* TOTAL: 화면 폭 전체 띠 */}
+        {/* TOTAL: 화면 폭 전체 띠 (TOTAL / 금액·개수 / GM·SHIP) */}
         <Pressable
           onPress={handleTotalPress}
           onLayout={(e) => setBandH(Math.round(e.nativeEvent.layout.height))}
           style={({ pressed }) => [styles.totalBand, { backgroundColor: totalColor }, pressed && { opacity: 0.95 }]}
         >
-          <View>
-            <Text style={[styles.totalLabel, onBandText]}>{c('home.totalLabel', 'TOTAL')}</Text>
+          <Text style={[styles.totalLabel, onBandText]}>{c('home.totalLabel', 'TOTAL')}</Text>
+          <View style={[styles.totalRow, { alignItems: 'baseline' }]}>
             <Text style={[styles.totalValue, { fontSize: 30 * fs }]}>${app.cartTotal.toFixed(2)}</Text>
-          </View>
-          <View style={{ alignItems: 'flex-end', gap: 6 }}>
             <Text style={[styles.totalSub, { fontSize: 13 * fs }, onBandText]}>
               {app.cart.length} items · {unitCount} units
             </Text>
+          </View>
+          <View style={[styles.totalRow, { alignItems: 'center', marginTop: 8 }]}>
+            <Pressable
+              onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
+              style={({ pressed }) => [styles.deptPill, pressed && { backgroundColor: 'rgba(255,255,255,0.38)' }]}
+              testID="department-toggle"
+            >
+              <Text style={[styles.shipText, { fontSize: 12 * fs, fontFamily: 'Inter_700Bold' }, onBandText]}>{app.department}</Text>
+            </Pressable>
             <View style={styles.shipPill}>
               <Text style={[styles.shipText, { fontSize: 11 * fs }, onBandText]}>{c('home.shipLabel', 'SHIP TO JBS')}</Text>
               <Switch
@@ -202,59 +209,33 @@ export default function HomeScreen() {
         {/* 배너: 화면 폭 꽉 채움, 자동 + 손으로 넘김 */}
         <BannerCarousel height={bandH * 2} />
 
-        {/* GM / PRODUCT 토글 */}
-        <View style={styles.gmRow}>
-          <Text style={[styles.themeTag, { color: colors.mutedForeground, fontSize: 11 * fs }]}>
-            {`Q${Math.floor(new Date().getMonth() / 3) + 1} · ${(app.appearance['global.theme'] || app.settings.theme || '').toUpperCase()}`}
-          </Text>
-          <Pressable
-            onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
-            style={({ pressed }) => [styles.gmBtn, { backgroundColor: colors.departmentToggle ?? colors.primary }, pressed && { opacity: 0.8 }]}
-            testID="department-toggle"
-          >
-            <Text style={{ color: '#fff', fontFamily: 'Inter_700Bold', fontSize: 12 * fs }}>{app.department}</Text>
-          </Pressable>
-        </View>
-
         {/* STORE / VENDOR 블록 */}
         <View style={styles.selectGroup}>
-          <View style={styles.selRow}>
-            <Text style={[styles.selLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{c('home.storeLabel', 'STORE')}</Text>
-            <View style={{ flex: 1 }}>
-              <Dropdown
-                placeholder="Select store"
-                options={app.stores.map((s) => ({ value: s.id, label: s.name, sublabel: `${s.address}` }))}
-                value={app.selectedStoreId}
-                onChange={(id) => guardedChange('store', id)}
-                testID="select-store"
-              />
-            </View>
-          </View>
-          <View style={styles.selRow}>
-            <Text style={[styles.selLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{c('home.vendorLabel', 'VENDOR')}</Text>
-            <View style={{ flex: 1 }}>
-              <Dropdown
-                placeholder="Select vendor"
-                options={app.vendors.map((v) => ({ value: v.id, label: v.name, sublabel: `${v.salesPerson} · ${v.email}` }))}
-                value={app.selectedVendorId}
-                onChange={(id) => guardedChange('vendor', id)}
-                testID="select-vendor"
-              />
-            </View>
-          </View>
-          <View style={styles.selRow}>
-            <Text style={[styles.selLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{c('home.savedLabel', 'SAVED')}</Text>
-            <View style={{ flex: 1 }}>
-              <Dropdown
-                placeholder="Select saved order"
-                options={savedOptions}
-                value={savedSelection}
-                onChange={setSavedSelection}
-                onDeleteOption={(id) => { app.deleteSavedCart(id); if (savedSelection === id) setSavedSelection(null); }}
-                testID="saved-list"
-              />
-            </View>
-          </View>
+          <Dropdown
+            label={c('home.storeLabel', 'STORE')}
+            placeholder="Select store"
+            options={app.stores.map((s) => ({ value: s.id, label: s.name, sublabel: `${s.address}` }))}
+            value={app.selectedStoreId}
+            onChange={(id) => guardedChange('store', id)}
+            testID="select-store"
+          />
+          <Dropdown
+            label={c('home.vendorLabel', 'VENDOR')}
+            placeholder="Select vendor"
+            options={app.vendors.map((v) => ({ value: v.id, label: v.name, sublabel: `${v.salesPerson} · ${v.email}` }))}
+            value={app.selectedVendorId}
+            onChange={(id) => guardedChange('vendor', id)}
+            testID="select-vendor"
+          />
+          <Dropdown
+            label={c('home.savedLabel', 'SAVED')}
+            placeholder="Select saved order"
+            options={savedOptions}
+            value={savedSelection}
+            onChange={setSavedSelection}
+            onDeleteOption={(id) => { app.deleteSavedCart(id); if (savedSelection === id) setSavedSelection(null); }}
+            testID="saved-list"
+          />
         </View>
 
         {/* 버튼 4개: SAVED와 하단 탭 사이 세로 가운데 */}
@@ -404,64 +385,58 @@ function BannerCarousel({ height }: { height: number }) {
   const { width } = useWindowDimensions();
   const [failed, setFailed] = useState<string[]>([]);
   const ids = BANNER_IDS.filter((id) => !failed.includes(id));
-  const n = ids.length;            // 배너 개수 = BANNER_IDS 줄 수 (실패한 건 제외)
-  const loop = n > 1;
-  // 무한 루프 줄: [마지막 복사본] 1 2 … n [첫 장 복사본]
-  const slides = loop ? [ids[n - 1], ...ids, ids[0]] : ids;
-  const SLIDE_MS = 450;            // 자동 슬라이드 끝난 뒤 순간이동까지 대기
-
-  const [index, setIndex] = useState(0);          // 점 표시용 (진짜 배너 번호 0..n-1)
+  const loop = ids.length > 1;
+  // 앞뒤 복제: [5] 1 2 3 4 5 [1]  → 끝에서 진짜 쪽으로 순간 점프
+  const slides = loop ? [ids[ids.length - 1], ...ids, ids[0]] : ids;
+  const [index, setIndex] = useState(0); // 점 표시용 진짜 번호 (0..n-1)
   const scrollRef = useRef<ScrollView>(null);
-  const pageRef = useRef(loop ? 1 : 0);           // 지금 보이는 칸 (복사본 포함 0..n+1)
+  const posRef = useRef(loop ? 1 : 0); // slides 안에서의 위치
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const jumpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fixTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 칸 번호 → 진짜 배너 번호
-  const realOf = (page: number) => (loop ? (page - 1 + n) % n : page);
+  const realOf = (pos: number) => (loop ? (pos - 1 + ids.length) % ids.length : pos);
 
-  const goTo = (page: number, animated: boolean) => {
-    scrollRef.current?.scrollTo({ x: page * width, animated });
-    pageRef.current = page;
-    setIndex(realOf(page));
+  const jump = (pos: number) => {
+    scrollRef.current?.scrollTo({ x: pos * width, animated: false });
+    posRef.current = pos;
   };
 
-  // 복사본 칸에 있으면 같은 그림의 진짜 칸으로 애니메이션 없이 순간이동
-  const fixEdge = () => {
-    if (!loop) return;
-    if (pageRef.current >= n + 1) goTo(1, false);
-    else if (pageRef.current <= 0) goTo(n, false);
+  // 복제 칸에 멈추면 진짜 칸으로 애니메이션 없이 이동
+  const settle = (x: number) => {
+    let pos = Math.max(0, Math.min(slides.length - 1, Math.round(x / width)));
+    if (loop && pos === 0) { pos = ids.length; jump(pos); }
+    else if (loop && pos === ids.length + 1) { pos = 1; jump(pos); }
+    posRef.current = pos;
+    setIndex(realOf(pos));
   };
 
   const stop = () => {
     if (timer.current) { clearInterval(timer.current); timer.current = null; }
-    if (jumpTimer.current) { clearTimeout(jumpTimer.current); jumpTimer.current = null; }
+    if (fixTimer.current) { clearTimeout(fixTimer.current); fixTimer.current = null; }
   };
   const start = () => {
     stop();
     if (!loop) return;
     timer.current = setInterval(() => {
-      if (pageRef.current >= n + 1) goTo(1, false); // 혹시 복사본에 남아 있으면 먼저 정리
-      goTo(pageRef.current + 1, true);               // 항상 앞으로만
-      if (jumpTimer.current) clearTimeout(jumpTimer.current);
-      jumpTimer.current = setTimeout(fixEdge, SLIDE_MS);
+      const next = posRef.current + 1;
+      scrollRef.current?.scrollTo({ x: next * width, animated: true });
+      posRef.current = next;
+      setIndex(realOf(next));
+      if (next === ids.length + 1) {
+        fixTimer.current = setTimeout(() => jump(1), 450); // 복제 [1] 도착 후 진짜 1로
+      }
     }, BANNER_INTERVAL);
   };
 
   useEffect(() => {
-    const first = loop ? 1 : 0;
-    pageRef.current = first;
+    posRef.current = loop ? 1 : 0;
     setIndex(0);
-    scrollRef.current?.scrollTo({ x: first * width, animated: false });
+    jump(posRef.current);
     start();
     return stop;
-  }, [n, width]);
+  }, [ids.length, width]);
 
-  if (n === 0 || height <= 0) return null; // 그림이 없거나 TOTAL 높이 측정 전이면 숨김
-
-  const syncPage = (x: number) => {
-    const p = Math.max(0, Math.min(slides.length - 1, Math.round(x / width)));
-    if (p !== pageRef.current) { pageRef.current = p; setIndex(realOf(p)); }
-  };
+  if (ids.length === 0 || height <= 0) return null; // 그림이 없거나 TOTAL 높이 측정 전이면 숨김
 
   return (
     <View style={{ width, height, marginTop: 4 }}>
@@ -471,11 +446,14 @@ function BannerCarousel({ height }: { height: number }) {
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={32}
-        onContentSizeChange={() => scrollRef.current?.scrollTo({ x: pageRef.current * width, animated: false })}
-        onScroll={(e) => syncPage(e.nativeEvent.contentOffset.x)}
+        onContentSizeChange={() => jump(posRef.current)}
+        onScroll={(e) => {
+          const p = Math.max(0, Math.min(slides.length - 1, Math.round(e.nativeEvent.contentOffset.x / width)));
+          setIndex(realOf(p));
+        }}
         onScrollBeginDrag={stop}
         onScrollEndDrag={start}
-        onMomentumScrollEnd={(e) => { syncPage(e.nativeEvent.contentOffset.x); fixEdge(); start(); }}
+        onMomentumScrollEnd={(e) => { settle(e.nativeEvent.contentOffset.x); start(); }}
       >
         {slides.map((id, i) => (
           <Image
@@ -754,7 +732,9 @@ const styles = StyleSheet.create({
   userEmail: { fontFamily: 'Inter_400Regular', marginTop: 2 },
   logoutBtn: { padding: 8 },
   // TOTAL 띠
-  totalBand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },
+  totalBand: { paddingHorizontal: 16, paddingVertical: 10 },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  deptPill: { height: 30, paddingHorizontal: 14, borderRadius: 15, justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.22)' },
   totalLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 3 },
   totalValue: { color: '#fff', fontFamily: 'Inter_700Bold', marginTop: 2 },
   totalSub: { color: 'rgba(255,255,255,0.85)', fontFamily: 'Inter_500Medium' },
@@ -765,21 +745,15 @@ const styles = StyleSheet.create({
   bannerDots: { position: 'absolute', right: 10, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.38)' },
   bannerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)' },
   bannerDotOn: { width: 16, backgroundColor: '#fff' },
-  // GM
-  gmRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 36, paddingLeft: 8, paddingRight: 16 },
-  themeTag: { fontFamily: 'Inter_600SemiBold', letterSpacing: 1.2 },
-  gmBtn: { height: 28, paddingHorizontal: 14, borderRadius: 14, justifyContent: 'center' },
   // STORE / VENDOR
-  selectGroup: { paddingHorizontal: 8, gap: 5 },
-  selRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  selLabel: { width: 52, fontFamily: 'Inter_600SemiBold', letterSpacing: 1.2 },
+  selectGroup: { gap: 5, marginTop: 10 },
   section: { marginBottom: 12 },
   sectionLabel: { fontSize: 11, fontFamily: 'Inter_700SemiBold', letterSpacing: 1.2, marginBottom: 6 },
   toggleRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 2 },
   toggleLabel: { fontFamily: 'Inter_500Medium' },
   // 버튼 4개
-  buttonArea: { flex: 1, justifyContent: 'center', paddingTop: 6, paddingBottom: 34 },
-  buttonGrid: { flexDirection: 'row', gap: 8, paddingHorizontal: 16 },
+  buttonArea: { flex: 1, justifyContent: 'center', paddingTop: 6, paddingBottom: 72 },
+  buttonGrid: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, transform: [{ translateY: -20 }] },
   actionWrap: { flex: 1, paddingBottom: 4 },
   actionDim: { opacity: 0.42 },
   actionRing: { position: 'absolute', top: -4, left: -4, right: -4, bottom: -4, borderRadius: 20, borderWidth: 2 },
