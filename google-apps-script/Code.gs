@@ -1,4 +1,4 @@
-// 최종 수정: 2026-10-20 12:45 PM(CT) 배포
+// 최종 수정: 2026-10-28 06:04 PM(CT) 배포
 var SS = SpreadsheetApp.getActiveSpreadsheet();
 function doGet(e) {
   
@@ -1557,11 +1557,19 @@ function getPurchaseData_(token, requestedDepartment) {
 
   // A contains actual purchase dates; other columns may include empty formulas.
   var purchaseReadStartedAt = Date.now();
+  var lastRow = 2;
   var bottomRow = sh.getMaxRows();
-  var bottomCell = sh.getRange(bottomRow, 1);
-  var lastRow = String(bottomCell.getDisplayValue() || '').trim()
-    ? bottomRow
-    : bottomCell.getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
+
+  if (bottomRow > 2) {
+    var dates = sh.getRange(3, 1, bottomRow - 2, 1).getDisplayValues();
+
+    for (var i = dates.length - 1; i >= 0; i--) {
+      if (String(dates[i][0] || '').trim()) {
+        lastRow = i + 3;
+        break;
+      }
+    }
+  }
   var recordCount = Math.max(0, lastRow - 2);
   var rows = recordCount ? sh.getRange(3, 1, recordCount, 8).getValues() : [];
   var displayRows = recordCount ? sh.getRange(3, 1, recordCount, 8).getDisplayValues() : [];
@@ -1583,8 +1591,8 @@ function getPurchaseData_(token, requestedDepartment) {
     return stores[name];
   }
 
-  // Fixed J3:M12 summary: J store, K invoiced, L (unused), M spent.
-  var summaryRows = sh.getRange('J3:M12').getValues();
+  // Fixed J3:M13 summary: J store, K invoiced, L (unused), M spent.
+  var summaryRows = sh.getRange('J3:M13').getValues();
   summaryRows.forEach(function (row) {
     var item = addStore_(row[0]);
     if (!item) return;
@@ -1592,8 +1600,8 @@ function getPurchaseData_(token, requestedDepartment) {
     item.spent = purchaseNumeric_(row[3]);
   });
 
-  // Budget store/value pairs are confined to AO2:BF2.
-  var budgetRow = sh.getRange('AO2:BF2').getValues()[0];
+  // Budget store/value pairs are confined to AQ2:BJ2.
+  var budgetRow = sh.getRange('AQ2:BJ2').getValues()[0];
   for (var b = 0; b < budgetRow.length - 1; b++) {
     var rawStore = String(budgetRow[b] || '').trim();
     var amount = purchaseNumeric_(budgetRow[b + 1]);
