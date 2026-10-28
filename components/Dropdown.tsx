@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Feather } from '@/components/AppIcon';
 import { useColors } from '@/hooks/useColors';
+import { useFontScale } from '@/context/AppContext';
 
 export interface Option {
   value: string;
@@ -23,6 +24,7 @@ interface Props {
   onChange: (value: string) => void;
   onDeleteOption?: (value: string) => void;
   testID?: string;
+  label?: string; // 넣으면 제목 + 드롭다운이 한 줄 상자로, 좌우 끝까지
 }
 
 export default function Dropdown({
@@ -32,8 +34,10 @@ export default function Dropdown({
   onChange,
   onDeleteOption,
   testID,
+  label,
 }: Props) {
   const colors = useColors();
+  const fs = useFontScale();
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value);
 
@@ -43,11 +47,19 @@ export default function Dropdown({
         onPress={() => setOpen(true)}
         style={({ pressed }) => [
           styles.trigger,
+          label ? styles.triggerBar : null,
           { backgroundColor: colors.card, borderColor: colors.border },
           pressed && { opacity: 0.7 },
         ]}
         testID={testID}
       >
+        {label ? (
+          <View style={[styles.barLabel, { borderRightColor: colors.border }]}>
+            <Text style={[styles.barLabelText, { color: colors.mutedForeground, fontSize: 11 * fs }]} numberOfLines={1}>
+              {label}
+            </Text>
+          </View>
+        ) : null}
         <Text
           style={[
             styles.triggerText,
@@ -127,6 +139,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   triggerText: { flex: 1, fontSize: 14, fontFamily: 'Inter_500Medium', marginRight: 8 },
+  // label 있을 때: 좌우 끝까지 붙는 한 줄 상자
+  triggerBar: { borderLeftWidth: 0, borderRightWidth: 0, borderRadius: 0, paddingHorizontal: 16, paddingVertical: 0, minHeight: 46 },
+  barLabel: { width: 64, alignSelf: 'stretch', justifyContent: 'center', borderRightWidth: 1, marginRight: 12 },
+  barLabelText: { fontFamily: 'Inter_600SemiBold', letterSpacing: 1.2 },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.45)',

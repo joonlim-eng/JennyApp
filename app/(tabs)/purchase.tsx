@@ -19,8 +19,6 @@ import { useColors } from '@/hooks/useColors';
 
 type Department = 'GM' | 'PRODUCT';
 
-// Independent fixed STORE choices for PURCHASE only. Do not synchronize with
-// the HOME/SCAN store selection and do not depend on the response's store list.
 const PURCHASE_STORES = [
   'ARLINGTON',
   'CARROLLTON',
@@ -166,6 +164,9 @@ export default function PurchaseScreen() {
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => { scrollRef.current?.scrollTo({ y: 0, animated: false }); }, [storeName]);
 
   // A single permitted department cannot be switched to another department.
   const effectiveDepartment: Department = allowedDepartments.includes(department)
@@ -326,8 +327,8 @@ export default function PurchaseScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <View style={styles.toolbar}>
+      <View style={[styles.header, isTotal && { paddingBottom: 8 }, { borderBottomColor: colors.border }]}>
+        <View style={[styles.toolbar, isTotal && { marginBottom: 0 }]}>
           <View style={styles.storeHeadingGroup}>
             <View style={styles.storeControls}>
               <Pressable
@@ -357,8 +358,8 @@ export default function PurchaseScreen() {
               </Pressable>
             </View>
             {!!result?.month && (
-              <Text style={[styles.month, { color: colors.mutedForeground, fontSize: 12 * fs }]}>
-                {result.month}
+              <Text style={[styles.month, isTotal && { marginTop: 6 }, { color: colors.mutedForeground, fontSize: 14 * fs }]}>
+                {result.month} {new Date().getFullYear()}
               </Text>
             )}
           </View>
@@ -414,7 +415,7 @@ export default function PurchaseScreen() {
         </>)}
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent}>
         {loading && <ActivityIndicator size="large" color={colors.primary} style={styles.spinner} />}
         {!!failure && (
           <View style={[styles.notice, { borderColor: colors.destructive }]}>
@@ -452,14 +453,20 @@ export default function PurchaseScreen() {
 
             <View style={[styles.totalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               {totalRows.map((row, index) => (
-                <View
+                <Pressable
                   key={row.name}
-                  style={[
+                  onPress={() => setStoreName(row.name)}
+                  disabled={!allowedStores.includes(row.name)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${row.name}`}
+                  testID={`purchase-total-row-${row.name}`}
+                  style={({ pressed }) => [
                     styles.totalItem,
                     index < totalRows.length - 1 && {
                       borderBottomWidth: StyleSheet.hairlineWidth,
                       borderBottomColor: colors.border,
                     },
+                    pressed && [styles.totalItemPressed, { backgroundColor: colors.background }],
                   ]}
                 >
                   <View style={styles.totalLine}>
@@ -476,7 +483,7 @@ export default function PurchaseScreen() {
                   <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
                     <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(row.budget)}</Text> / {plain(row.remaining)}
                   </Text>
-                </View>
+                </Pressable>
               ))}
             </View>
           </View>
@@ -582,8 +589,6 @@ const styles = StyleSheet.create({
   empty: { paddingVertical: 28, textAlign: 'center', fontFamily: 'Inter_400Regular' },
   spinner: { marginVertical: 28 },
   notice: { padding: 16, borderWidth: 1, borderRadius: 10, marginBottom: 12 },
-  // TOTAL view: two cards (summary + stores), outer margin 6.
-  // Negative margins reduce scrollContent padding (12 -> 6) for this view only.
   totalWrap: { marginHorizontal: -6, marginTop: -6, gap: 6 },
   totalCard: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, overflow: 'hidden' },
   totalSummary: { paddingTop: 8, paddingBottom: 10 },
@@ -594,4 +599,5 @@ const styles = StyleSheet.create({
   totalAmount: { flexShrink: 1, marginLeft: 12, textAlign: 'right' },
   totalSub: { fontFamily: 'Inter_500Medium', fontVariant: ['tabular-nums'], marginTop: 2 },
   totalItem: { paddingVertical: 12 },
+  totalItemPressed: { marginHorizontal: -12, paddingHorizontal: 12 },
 });

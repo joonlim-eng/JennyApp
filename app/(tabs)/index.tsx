@@ -170,20 +170,27 @@ export default function HomeScreen() {
 
       <View style={styles.body}>
 
-        {/* TOTAL: 화면 폭 전체 띠 */}
+        {/* TOTAL: 화면 폭 전체 띠 (TOTAL / 금액·개수 / GM·SHIP) */}
         <Pressable
           onPress={handleTotalPress}
           onLayout={(e) => setBandH(Math.round(e.nativeEvent.layout.height))}
           style={({ pressed }) => [styles.totalBand, { backgroundColor: totalColor }, pressed && { opacity: 0.95 }]}
         >
-          <View>
-            <Text style={[styles.totalLabel, onBandText]}>{c('home.totalLabel', 'TOTAL')}</Text>
+          <Text style={[styles.totalLabel, onBandText]}>{c('home.totalLabel', 'TOTAL')}</Text>
+          <View style={[styles.totalRow, { alignItems: 'baseline' }]}>
             <Text style={[styles.totalValue, { fontSize: 30 * fs }]}>${app.cartTotal.toFixed(2)}</Text>
-          </View>
-          <View style={{ alignItems: 'flex-end', gap: 6 }}>
             <Text style={[styles.totalSub, { fontSize: 13 * fs }, onBandText]}>
               {app.cart.length} items · {unitCount} units
             </Text>
+          </View>
+          <View style={[styles.totalRow, { alignItems: 'center', marginTop: 8 }]}>
+            <Pressable
+              onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
+              style={({ pressed }) => [styles.deptPill, pressed && { backgroundColor: 'rgba(255,255,255,0.38)' }]}
+              testID="department-toggle"
+            >
+              <Text style={[styles.shipText, { fontSize: 12 * fs, fontFamily: 'Inter_700Bold' }, onBandText]}>{app.department}</Text>
+            </Pressable>
             <View style={styles.shipPill}>
               <Text style={[styles.shipText, { fontSize: 11 * fs }, onBandText]}>{c('home.shipLabel', 'SHIP TO JBS')}</Text>
               <Switch
@@ -202,59 +209,33 @@ export default function HomeScreen() {
         {/* 배너: 화면 폭 꽉 채움, 자동 + 손으로 넘김 */}
         <BannerCarousel height={bandH * 2} />
 
-        {/* GM / PRODUCT 토글 */}
-        <View style={styles.gmRow}>
-          <Text style={[styles.themeTag, { color: colors.mutedForeground, fontSize: 11 * fs }]}>
-            {`Q${Math.floor(new Date().getMonth() / 3) + 1} · ${(app.appearance['global.theme'] || app.settings.theme || '').toUpperCase()}`}
-          </Text>
-          <Pressable
-            onPress={() => app.setDepartment(app.department === 'GM' ? 'PRODUCT' : 'GM')}
-            style={({ pressed }) => [styles.gmBtn, { backgroundColor: colors.departmentToggle ?? colors.primary }, pressed && { opacity: 0.8 }]}
-            testID="department-toggle"
-          >
-            <Text style={{ color: '#fff', fontFamily: 'Inter_700Bold', fontSize: 12 * fs }}>{app.department}</Text>
-          </Pressable>
-        </View>
-
         {/* STORE / VENDOR 블록 */}
         <View style={styles.selectGroup}>
-          <View style={styles.selRow}>
-            <Text style={[styles.selLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{c('home.storeLabel', 'STORE')}</Text>
-            <View style={{ flex: 1 }}>
-              <Dropdown
-                placeholder="Select store"
-                options={app.stores.map((s) => ({ value: s.id, label: s.name, sublabel: `${s.address}` }))}
-                value={app.selectedStoreId}
-                onChange={(id) => guardedChange('store', id)}
-                testID="select-store"
-              />
-            </View>
-          </View>
-          <View style={styles.selRow}>
-            <Text style={[styles.selLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{c('home.vendorLabel', 'VENDOR')}</Text>
-            <View style={{ flex: 1 }}>
-              <Dropdown
-                placeholder="Select vendor"
-                options={app.vendors.map((v) => ({ value: v.id, label: v.name, sublabel: `${v.salesPerson} · ${v.email}` }))}
-                value={app.selectedVendorId}
-                onChange={(id) => guardedChange('vendor', id)}
-                testID="select-vendor"
-              />
-            </View>
-          </View>
-          <View style={styles.selRow}>
-            <Text style={[styles.selLabel, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{c('home.savedLabel', 'SAVED')}</Text>
-            <View style={{ flex: 1 }}>
-              <Dropdown
-                placeholder="Select saved order"
-                options={savedOptions}
-                value={savedSelection}
-                onChange={setSavedSelection}
-                onDeleteOption={(id) => { app.deleteSavedCart(id); if (savedSelection === id) setSavedSelection(null); }}
-                testID="saved-list"
-              />
-            </View>
-          </View>
+          <Dropdown
+            label={c('home.storeLabel', 'STORE')}
+            placeholder="Select store"
+            options={app.stores.map((s) => ({ value: s.id, label: s.name, sublabel: `${s.address}` }))}
+            value={app.selectedStoreId}
+            onChange={(id) => guardedChange('store', id)}
+            testID="select-store"
+          />
+          <Dropdown
+            label={c('home.vendorLabel', 'VENDOR')}
+            placeholder="Select vendor"
+            options={app.vendors.map((v) => ({ value: v.id, label: v.name, sublabel: `${v.salesPerson} · ${v.email}` }))}
+            value={app.selectedVendorId}
+            onChange={(id) => guardedChange('vendor', id)}
+            testID="select-vendor"
+          />
+          <Dropdown
+            label={c('home.savedLabel', 'SAVED')}
+            placeholder="Select saved order"
+            options={savedOptions}
+            value={savedSelection}
+            onChange={setSavedSelection}
+            onDeleteOption={(id) => { app.deleteSavedCart(id); if (savedSelection === id) setSavedSelection(null); }}
+            testID="saved-list"
+          />
         </View>
 
         {/* 버튼 4개: SAVED와 하단 탭 사이 세로 가운데 */}
@@ -726,7 +707,9 @@ const styles = StyleSheet.create({
   userEmail: { fontFamily: 'Inter_400Regular', marginTop: 2 },
   logoutBtn: { padding: 8 },
   // TOTAL 띠
-  totalBand: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },
+  totalBand: { paddingHorizontal: 16, paddingVertical: 10 },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  deptPill: { height: 30, paddingHorizontal: 14, borderRadius: 15, justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.22)' },
   totalLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 3 },
   totalValue: { color: '#fff', fontFamily: 'Inter_700Bold', marginTop: 2 },
   totalSub: { color: 'rgba(255,255,255,0.85)', fontFamily: 'Inter_500Medium' },
@@ -737,21 +720,15 @@ const styles = StyleSheet.create({
   bannerDots: { position: 'absolute', right: 10, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.38)' },
   bannerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)' },
   bannerDotOn: { width: 16, backgroundColor: '#fff' },
-  // GM
-  gmRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 36, paddingLeft: 8, paddingRight: 16 },
-  themeTag: { fontFamily: 'Inter_600SemiBold', letterSpacing: 1.2 },
-  gmBtn: { height: 28, paddingHorizontal: 14, borderRadius: 14, justifyContent: 'center' },
   // STORE / VENDOR
-  selectGroup: { paddingHorizontal: 8, gap: 5 },
-  selRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  selLabel: { width: 52, fontFamily: 'Inter_600SemiBold', letterSpacing: 1.2 },
+  selectGroup: { gap: 5, marginTop: 10 },
   section: { marginBottom: 12 },
   sectionLabel: { fontSize: 11, fontFamily: 'Inter_700SemiBold', letterSpacing: 1.2, marginBottom: 6 },
   toggleRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 2 },
   toggleLabel: { fontFamily: 'Inter_500Medium' },
   // 버튼 4개
-  buttonArea: { flex: 1, justifyContent: 'center', paddingTop: 6, paddingBottom: 34 },
-  buttonGrid: { flexDirection: 'row', gap: 8, paddingHorizontal: 16 },
+  buttonArea: { flex: 1, justifyContent: 'center', paddingTop: 6, paddingBottom: 72 },
+  buttonGrid: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, transform: [{ translateY: -20 }] },
   actionWrap: { flex: 1, paddingBottom: 4 },
   actionDim: { opacity: 0.42 },
   actionRing: { position: 'absolute', top: -4, left: -4, right: -4, bottom: -4, borderRadius: 20, borderWidth: 2 },
