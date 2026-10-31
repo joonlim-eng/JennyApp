@@ -35,6 +35,7 @@
         }
       ],
       "expo-sharing",
+      "./plugins/withBeeSalesCleartext",
       [
         "expo-splash-screen",
         {

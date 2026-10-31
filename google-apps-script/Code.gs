@@ -1,4 +1,4 @@
-// 최종 수정: 2026-10-28 06:04 PM(CT) 배포
+// 최종 수정: 2026-10-31 01:24 AM(CT) 배포  ANNIE EXCEL
 var SS = SpreadsheetApp.getActiveSpreadsheet();
 function doGet(e) {
   
@@ -643,6 +643,15 @@ function recordOrderInner_(sh, body, startTime) { // startTime 파라미터
     }
   } else {
     emailNote = 'vendor email missing in order data';
+  }
+
+  // 4.5) ANNIE 한정: 매장별 템플릿 엑셀에 ITEM CODE/QTY 밸류 카피 → PDF와 같은 이름·같은 폴더에 xlsx 저장
+  if (String(body.vendor || '').trim().toUpperCase() === 'ANNIE') {
+    try {
+      saveAnnieXlsx_(body, fileName, savedFile.getParents().next());
+    } catch (annieErr) {
+      emailNote = (emailNote ? emailNote + '\n' : '') + 'Failed to create ANNIE XLSX file: ' + String(annieErr);
+    }
   }
 
   // 5) Order Backup 스프레드시트에 값+서식 사본 탭 추가 — 실패 시 어느 단계인지 표시
@@ -1684,4 +1693,223 @@ function getPurchaseData_(token, requestedDepartment) {
     stores: orderNames.map(function (name) { return stores[name]; }),
     cards: cards
   };
+}
+
+/* ======================== ANNIE XLSX ======================== */
+var ANNIE_TEMPLATE_FOLDER_ID_ = '1PxoOyrzn-HIqazbauc15hIfQeZGN5rhj';
+
+// 템플릿 "매장명 ANNIE.xlsx"를 구글시트로 변환하지 않고 엑셀 내부 XML을 직접 수정
+// → 조건부 서식·수식·서식 등 템플릿 원형 그대로 유지
+// ORDER DETAIL A14~: ITEM CODE / B14~: QTY → PDF와 같은 이름·같은 폴더에 xlsx 저장
+function saveAnnieXlsx_(body, fileName, saveFolder) {
+  var store = String(body.store || '').trim().toUpperCase();
+  var templateName = store + ' ANNIE.xlsx';
+
+  var templates = DriveApp.getFolderById(ANNIE_TEMPLATE_FOLDER_ID_).getFilesByName(templateName);
+  if (!templates.hasNext()) throw new Error('Template not found: ' + templateName);
+  var template = templates.next();
+
+  // 1) xlsx(zip) 풀기
+  var zipBlob = Utilities.newBlob(template.getBlob().getBytes(), 'application/zip', 'template.zip');
+  var files = {};
+  Utilities.unzip(zipBlob).forEach(function (b) { files[b.getName()] = b; });
+
+  function readXml_(path) {
+    if (!files[path]) throw new Error('Missing ' + path + ' in ' + templateName);
+    return files[path].getDataAsString('UTF-8');
+  }
+  function writeXml_(path, xml) {
+    files[path] = Utilities.newBlob(xml, 'application/xml', path);
+  }
+
+  // 2) ORDER DETAIL 탭의 시트 XML 경로 찾기
+  var wbXml = readXml_('xl/workbook.xml');
+  var relId = '';
+  var sheetTags = wbXml.match(/<sheet\b[^>]*>/g) || [];
+  for (var i = 0; i < sheetTags.length; i++) {
+    var nm = (sheetTags[i].match(/\bname="([^"]*)"/) || [])[1];
+    if (nm === 'ORDER DETAIL') {
+      relId = (sheetTags[i].match(/\b[A-Za-z0-9]+:id="([^"]*)"/) || [])[1] || '';
+      break;
+    }
+  }
+  if (!relId) throw new Error('ORDER DETAIL tab not found in ' + templateName);
+
+  var relsXml = readXml_('xl/_rels/workbook.xml.rels');
+  var target = '';
+  var relTags = relsXml.match(/<Relationship\b[^>]*>/g) || [];
+  for (var j = 0; j < relTags.length; j++) {
+    if ((relTags[j].match(/\bId="([^"]*)"/) || [])[1] === relId) {
+      target = (relTags[j].match(/\bTarget="([^"]*)"/) || [])[1] || '';
+      break;
+    }
+  }
+  if (!target) throw new Error('ORDER DETAIL sheet file not found in ' + templateName);
+  var sheetPath = target.charAt(0) === '/' ? target.substring(1) : 'xl/' + target.replace(/^\.\//, '');
+
+  // 3) A14~: ITEM CODE / B14~: QTY 숫자 그대로 기록 (셀 서식 유지)
+  var sheetXml = readXml_(sheetPath);
+  var items = body.items || [];
+  var lostMasters = [];
+  for (var k = 0; k < items.length; k++) {
+    sheetXml = annieSetRowCells_(sheetXml, 14 + k, items[k].itemCode, Number(items[k].qty) || 0, lostMasters);
+  }
+  // 덮어쓴 칸이 공유 수식 원본이었으면, 남은 첫 칸에 원본을 넘겨줌 (엑셀 수동 입력과 동일)
+  lostMasters.forEach(function (master) {
+    sheetXml = annieHandOverSharedFormula_(sheetXml, master);
+  });
+  writeXml_(sheetPath, sheetXml);
+
+  // 4) 계산 순서표(calcChain) 삭제 — 엑셀이 열 때 자동으로 다시 만듦
+  if (files['xl/calcChain.xml']) {
+    delete files['xl/calcChain.xml'];
+    writeXml_('xl/_rels/workbook.xml.rels',
+      readXml_('xl/_rels/workbook.xml.rels').replace(/<Relationship\b[^>]*Target="[^"]*calcChain\.xml"[^>]*\/>/g, ''));
+    writeXml_('[Content_Types].xml',
+      readXml_('[Content_Types].xml').replace(/<Override\b[^>]*PartName="\/xl\/calcChain\.xml"[^>]*\/>/g, ''));
+  }
+
+  // 5) 엑셀이 열 때 전체 재계산하도록 표시
+  if (/<calcPr\b/.test(wbXml)) {
+    wbXml = wbXml.replace(/<calcPr\b([^>]*?)(\/?)>/, function (m, attrs, slash) {
+      return '<calcPr' + attrs.replace(/\s+fullCalcOnLoad="[^"]*"/, '') + ' fullCalcOnLoad="1"' + slash + '>';
+    });
+  } else {
+    var anchors = ['</definedNames>', '</externalReferences>', '</sheets>'];
+    for (var a = 0; a < anchors.length; a++) {
+      var p = wbXml.indexOf(anchors[a]);
+      if (p !== -1) {
+        p += anchors[a].length;
+        wbXml = wbXml.substring(0, p) + '<calcPr fullCalcOnLoad="1"/>' + wbXml.substring(p);
+        break;
+      }
+    }
+  }
+  writeXml_('xl/workbook.xml', wbXml);
+
+  // 6) 다시 묶어서 PDF와 같은 이름·같은 폴더에 저장
+  var paths = Object.keys(files).sort(function (x, y) {
+    return (x === '[Content_Types].xml' ? -1 : 0) - (y === '[Content_Types].xml' ? -1 : 0);
+  });
+  var xlsxBlob = Utilities.zip(paths.map(function (path) { return files[path]; }), fileName + '.xlsx')
+    .setContentType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+
+  return saveFolder.createFile(xlsxBlob);
+}
+
+// 한 행의 A/B 셀만 교체 (기존 셀 스타일 유지, 그 행의 다른 셀은 그대로)
+// 덮어쓴 칸이 공유 수식 원본이면 lostMasters에 기록
+function annieSetRowCells_(xml, rowNum, codeVal, qtyVal, lostMasters) {
+  xml = xml.replace(/<sheetData\s*\/>/, '<sheetData></sheetData>');
+
+  var openRe = new RegExp('<row\\b[^>]*\\br="' + rowNum + '"[^>]*>');
+  var m = openRe.exec(xml);
+  var openTag, content, start, end;
+
+  if (m) {
+    start = m.index;
+    openTag = m[0];
+    if (/\/>$/.test(openTag)) {
+      content = '';
+      end = start + openTag.length;
+    } else {
+      var close = xml.indexOf('</row>', start + openTag.length);
+      content = xml.substring(start + openTag.length, close);
+      end = close + 6;
+    }
+    openTag = openTag.replace(/\s+spans="[^"]*"/, '').replace(/\s*\/>$/, '>');
+  } else {
+    // 템플릿에 없는 행이면 행 번호 순서에 맞는 위치에 새로 삽입
+    openTag = '<row r="' + rowNum + '">';
+    content = '';
+    var rowRe = /<row\b[^>]*\br="(\d+)"/g, rm;
+    start = -1;
+    while ((rm = rowRe.exec(xml)) !== null) {
+      if (Number(rm[1]) > rowNum) { start = rm.index; break; }
+    }
+    if (start === -1) start = xml.indexOf('</sheetData>');
+    end = start;
+  }
+
+  // 기존 A/B 셀 제거하면서 스타일 번호(s)만 보관
+  var styleA = '', styleB = '';
+  content = content.replace(/<c\b[^>]*?\br="([AB])\d+"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g, function (cell, col) {
+    var tag = cell.match(/^<c\b[^>]*/)[0];
+    var s = (tag.match(/\bs="(\d+)"/) || [])[1] || '';
+    if (col === 'A') styleA = s; else styleB = s;
+
+    // 공유 수식 원본(ref가 있는 shared f)이면 기록
+    var f = cell.match(/<f\b([^>]*)>([\s\S]*?)<\/f>/);
+    if (f && /\bt="shared"/.test(f[1]) && /\bref="/.test(f[1])) {
+      lostMasters.push({
+        si: (f[1].match(/\bsi="(\d+)"/) || [])[1],
+        ref: (f[1].match(/\bref="([^"]*)"/) || [])[1],
+        formula: f[2],
+        cell: (tag.match(/\br="([A-Z]+\d+)"/) || [])[1]
+      });
+    }
+    return '';
+  });
+
+  var cells = annieCell_('A' + rowNum, styleA, codeVal) + annieCell_('B' + rowNum, styleB, qtyVal);
+  return xml.substring(0, start) + openTag + cells + content + '</row>' + xml.substring(end);
+}
+
+// 공유 수식 원본을 남은 첫 칸으로 넘김 (수식의 상대 참조는 그 칸 위치에 맞게 이동)
+function annieHandOverSharedFormula_(xml, master) {
+  if (!master.si || !master.ref || !master.cell) return xml;
+  var depRe = new RegExp('<f\\b[^>]*\\bsi="' + master.si + '"[^>]*\\/>');
+  var dm = depRe.exec(xml);
+  if (!dm) return xml; // 남은 칸 없음
+  var depTag = dm[0];
+  if (/\bref="/.test(depTag)) return xml;
+
+  var cStart = xml.lastIndexOf('<c ', dm.index);
+  var newCell = (xml.substring(cStart, dm.index).match(/\br="([A-Z]+\d+)"/) || [])[1];
+  if (!newCell) return xml;
+
+  var from = annieSplitRef_(master.cell), to = annieSplitRef_(newCell);
+  var formula = annieShiftFormula_(master.formula, to.row - from.row, to.col - from.col);
+  var refEnd = master.ref.indexOf(':') !== -1 ? master.ref.split(':')[1] : newCell;
+  var newTag = '<f t="shared" ref="' + newCell + ':' + refEnd + '" si="' + master.si + '">' + formula + '</f>';
+  return xml.substring(0, dm.index) + newTag + xml.substring(dm.index + depTag.length);
+}
+
+function annieSplitRef_(ref) {
+  var m = String(ref).match(/^([A-Z]+)(\d+)$/);
+  var col = 0;
+  for (var i = 0; i < m[1].length; i++) col = col * 26 + (m[1].charCodeAt(i) - 64);
+  return { col: col, row: Number(m[2]) };
+}
+
+function annieColName_(n) {
+  var s = '';
+  while (n > 0) { var r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+// 따옴표 안(문자열·시트명)은 건드리지 않고, $ 없는 행/열만 이동
+function annieShiftFormula_(formula, dRow, dCol) {
+  return formula.split(/(&quot;[\s\S]*?&quot;|"[^"]*"|'[^']*')/).map(function (part, idx) {
+    if (idx % 2 === 1) return part;
+    return part.replace(/(^|[^A-Za-z0-9_.])(\$?)([A-Z]{1,3})(\$?)(\d+)(?![A-Za-z0-9_(])/g,
+      function (all, pre, cAbs, col, rAbs, row) {
+        var c = col, r = row;
+        if (!cAbs && dCol) c = annieColName_(annieSplitRef_(col + '1').col + dCol);
+        if (!rAbs && dRow) r = String(Number(row) + dRow);
+        return pre + cAbs + c + rAbs + r;
+      });
+  }).join('');
+}
+
+// 숫자는 숫자 셀, 숫자가 아니면 텍스트 셀
+function annieCell_(ref, style, value) {
+  var sAttr = style ? ' s="' + style + '"' : '';
+  var text = String(value === null || value === undefined ? '' : value).trim();
+  if (text === '') return '<c r="' + ref + '"' + sAttr + '/>';
+  if (/^-?\d+(\.\d+)?$/.test(text)) {
+    return '<c r="' + ref + '"' + sAttr + '><v>' + text + '</v></c>';
+  }
+  var esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return '<c r="' + ref + '"' + sAttr + ' t="inlineStr"><is><t>' + esc + '</t></is></c>';
 }
