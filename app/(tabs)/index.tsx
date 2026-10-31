@@ -38,6 +38,7 @@ const BANNER_IDS = [
 const BANNER_BUST = Date.now(); //TIME APPLIED
 const bannerUrl = (id: string) => `https://drive.google.com/thumbnail?id=${id}&sz=w1600&t=${BANNER_BUST}`;
 const BANNER_INTERVAL = 5500; // INTERVAL
+const H_MARGIN = 16; // 본문 좌우 여백 (cart/scan과 동일)
 
 function notify(title: string, msg: string) {
   if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
@@ -128,7 +129,7 @@ export default function HomeScreen() {
       return { value: s.id, label: s.name, sublabel };
     });
 
-  // 배너 높이 = TOTAL 띠 높이 × 2 (TOTAL 띠를 실제로 재서 맞춤)
+  // 배너 높이 = TOTAL 띠 높이 × 1.7 (TOTAL 띠를 실제로 재서 맞춤)
   const [bandH, setBandH] = useState(0);
 
   const totalColor = c('home.totalCardColor', colors.totalCard ?? colors.primary);
@@ -206,8 +207,8 @@ export default function HomeScreen() {
           </View>
         </Pressable>
 
-        {/* 배너: 화면 폭 꽉 채움, 자동 + 손으로 넘김 */}
-        <BannerCarousel height={bandH * 2} />
+        {/* 배너: 좌우 여백 안쪽 폭, 자동 + 손으로 넘김 */}
+        <BannerCarousel height={Math.round(bandH * 1.7)} />
 
         {/* STORE / VENDOR 블록 */}
         <View style={styles.selectGroup}>
@@ -382,7 +383,8 @@ function ActionButton({
 }
 
 function BannerCarousel({ height }: { height: number }) {
-  const { width } = useWindowDimensions();
+  const { width: winW } = useWindowDimensions();
+  const width = winW - H_MARGIN * 2; // body 좌우 여백만큼 줄여야 넘김 위치가 맞음
   const [failed, setFailed] = useState<string[]>([]);
   const ids = BANNER_IDS.filter((id) => !failed.includes(id));
   const loop = ids.length > 1;
@@ -725,7 +727,7 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 14, fontWeight: '500' },
   sendingTitle: { fontWeight: '700' },
   sendingSub: { textAlign: 'center' },
-  body: { flex: 1 },
+  body: { flex: 1, paddingHorizontal: H_MARGIN },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   brand: { fontFamily: 'Inter_700Bold', letterSpacing: 1.5 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
