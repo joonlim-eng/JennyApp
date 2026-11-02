@@ -322,17 +322,19 @@ export default function PurchaseScreen() {
   const [refreshKey, setRefreshKey] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
 
-  // Android back closes the in-place order detail, not the PURCHASE route.
-  // Register only while PURCHASE is focused and a detail is open.
+  // Android back steps up in place: ORDER ITEM > STORE > OVERVIEW.
+  // From OVERVIEW (or without OVERVIEW access), back leaves the PURCHASE route.
+  const canBackToOverview = storeName !== TOTAL_STORE && allowedStores.includes(TOTAL_STORE);
   useFocusEffect(useCallback(() => {
-    if (Platform.OS !== 'android' || !selectedOrder) return;
+    if (Platform.OS !== 'android' || (!selectedOrder && !canBackToOverview)) return;
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      setSelectedOrder(null);
+      if (selectedOrder) setSelectedOrder(null);
+      else setStoreName(TOTAL_STORE);
       return true; // Consume this press so the navigator cannot leave PURCHASE.
     });
     return () => subscription.remove();
-  }, [selectedOrder]));
+  }, [selectedOrder, canBackToOverview]));
 
   useEffect(() => { scrollRef.current?.scrollTo({ y: 0, animated: false }); }, [storeName]);
 
