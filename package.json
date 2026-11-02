@@ -13,6 +13,7 @@
     "ios": "expo run:ios"
   },
   "dependencies": {
+    "@expo/metro-runtime": "~57.0.17",
     "expo": "~57.0.20",
     "expo-camera": "~57.0.4",
     "expo-clipboard": "~57.0.1",
@@ -21,7 +22,9 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
-    "react-native-app": "^1.0.0"
+    "react-native-app": "^1.0.0",
+    "react-native-web": "^0.21.2",
+    "react-native-webview": "13.16.1"
   },
   "devDependencies": {
     "@babel/core": "7.29.7",

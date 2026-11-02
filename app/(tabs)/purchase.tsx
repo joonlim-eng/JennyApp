@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   FlatList,
   Linking,
   Modal,
@@ -12,7 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Redirect } from 'expo-router';
+import { Redirect, useFocusEffect } from 'expo-router';
 import { Feather } from '@/components/AppIcon';
 import { APP_BUILD_KEY, useApp, useFontScale } from '@/context/AppContext';
 import { useColors } from '@/hooks/useColors';
@@ -33,10 +34,20 @@ const PURCHASE_STORES = [
   'JBS',
 ] as const;
 // TOTAL view: only these accounts. Always the first item in dropdown / cycle.
-const TOTAL_STORE = 'TOTAL';
+const TOTAL_STORE = 'TOTAL'; // Internal key; displayed as OVERVIEW.
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+] as const;
 const TOTAL_VIEW_EMAILS: readonly string[] = ['samhong@jennybs.com', 'joonlim@jennybs.com'];
 // Rows shown in the TOTAL table (JBS excluded).
 const TOTAL_ROW_STORES: readonly string[] = PURCHASE_STORES.filter((s) => s !== 'JBS');
+// Neutral two-letter store marks in the OVERVIEW list (MESQUITE = MQ).
+const STORE_MARKS: Record<string, string> = {
+  ARLINGTON: 'AR', CARROLLTON: 'CR', DALLAS: 'DA', DESOTO: 'DS',
+  HOUSTON: 'HO', IRVING: 'IR', LEWISVILLE: 'LE', MANSFIELD: 'MA',
+  MEADOW: 'ME', MESQUITE: 'MQ',
+};
 type StoreSummary = {
   name: string;
   spent: number | null;
@@ -56,12 +67,33 @@ type PurchaseOrder = {
   total: number;
   invoiceIssued: boolean;
 };
+type WmsInvoice = {
+  invoiceNumber: string;
+  vendor?: string | null;
+  type?: string | null;
+  status?: string | null;
+  assignedStoreName?: string | null;
+  receivedDate?: string | null;
+  completedDate?: string | null;
+  dispatchedAt?: string | null;
+  droppedAt?: string | null;
+  deliveredAt?: string | null;
+  createdAt?: string | null;
+  totalBoxCount?: number | null;
+};
+type WmsResponse = {
+  ok: boolean;
+  invoices?: WmsInvoice[];
+};
+
 type PurchaseResponse = {
   ok: boolean;
   error?: string;
   message?: string;
   configured?: boolean;
   month?: string;
+  year?: number;
+  sheetName?: string;
   department?: Department;
   stores?: StoreSummary[];
   cards?: PurchaseOrder[];
@@ -118,6 +150,118 @@ function MoneyText({
   );
 }
 
+// OVERVIEW palette: derive readable text from the current app primary color.
+type RGBColor = { r: number; g: number; b: number };
+const limit = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+const rgbHex = ({ r, g, b }: RGBColor) =>
+  `#${[r, g, b].map((v) => Math.round(limit(v, 0, 255)).toString(16).padStart(2, '0')).join('')}`;
+
+const parseRgb = (value: string): RGBColor | null => {
+  const input = value.trim();
+  if (/^#[\da-f]{3,4}$/i.test(input)) {
+    return { r: parseInt(input[1] + input[1], 16), g: parseInt(input[2] + input[2], 16), b: parseInt(input[3] + input[3], 16) };
+  }
+  if (/^#[\da-f]{6}([\da-f]{2})?$/i.test(input)) {
+    return { r: parseInt(input.slice(1, 3), 16), g: parseInt(input.slice(3, 5), 16), b: parseInt(input.slice(5, 7), 16) };
+  }
+  const rgb = input.match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)(?:\s*,\s*[\d.]+)?\s*\)$/i);
+  if (rgb) return { r: limit(+rgb[1], 0, 255), g: limit(+rgb[2], 0, 255), b: limit(+rgb[3], 0, 255) };
+  return null;
+};
+const blendRgb = (start: RGBColor, end: RGBColor, amount: number): RGBColor => ({
+  r: start.r + (end.r - start.r) * amount,
+  g: start.g + (end.g - start.g) * amount,
+  b: start.b + (end.b - start.b) * amount,
+});
+const WHITE: RGBColor = { r: 255, g: 255, b: 255 };
+const INK: RGBColor = { r: 17, g: 25, b: 40 };
+const relativeLuminance = ({ r, g, b }: RGBColor): number => {
+  const convert = (component: number) => {
+    const channel = component / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * convert(r) + 0.7152 * convert(g) + 0.0722 * convert(b);
+};
+const contrastRatio = (one: RGBColor, two: RGBColor) => {
+  const first = relativeLuminance(one);
+  const second = relativeLuminance(two);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+};
+const readableInk = (background: RGBColor): RGBColor => {
+  if (contrastRatio(WHITE, background) >= 4.5) return WHITE;
+  if (contrastRatio(INK, background) >= 4.5) return INK;
+  return { r: 0, g: 0, b: 0 }; // Handles the narrow mid-gray range safely.
+};
+
+const overviewTheme = (primaryColor: string, surfaceColor: string) => {
+  // Native theme tokens normally use #RGB/#RRGGBB; RGB is supported too.
+  const primary = parseRgb(primaryColor) ?? INK;
+  const surface = parseRgb(surfaceColor) ?? WHITE;
+  const summaryText = readableInk(primary);
+  const pillText = readableInk(surface);
+  const greenChoices = ['#128339', '#08752b', '#4ede83', '#9cf4af']
+    .map((color) => parseRgb(color)!).filter((color) => contrastRatio(color, surface) >= 4.5);
+  const green = greenChoices[0] ?? pillText;
+  return {
+    card: rgbHex(primary),
+    text: rgbHex(summaryText),
+    divider: rgbHex(blendRgb(primary, summaryText, 0.40)),
+    glow: rgbHex(summaryText),
+    pill: surfaceColor,
+    pillText: rgbHex(pillText),
+    pillDivider: rgbHex(blendRgb(surface, pillText, 0.19)),
+    remainingGreen: rgbHex(green),
+  };
+};
+
+// Keep warehouse status text independent from the purchase-sheet invoice link label.
+const wmsInvoiceKey = (s: string) => String(s || '').trim().toUpperCase();
+const wmsStatusLabel = (s: string) => ({
+  '입고': 'RECEIVED',
+  '작업중': 'IN PROGRESS',
+  '발송대기': 'READY TO SHIP',
+} as Record<string, string>)[s] || s.replace(/_/g, ' ').toUpperCase();
+
+const wmsDate = (value: string | null | undefined): string => {
+  if (!value) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`;
+  }
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(parsed);
+  } catch { return ''; }
+};
+const wmsTime = (value: string | null | undefined): string => {
+  if (!value || !value.includes('T')) return '';
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true,
+    }).format(parsed);
+  } catch { return ''; }
+};
+const wmsStatusDate = (item: WmsInvoice): string => {
+  const value = item.status?.trim().toUpperCase();
+  if (value === 'SENT') return wmsDate(item.dispatchedAt);
+  if (value === 'DROPPED') return wmsDate(item.droppedAt);
+  if (value === '발송대기' || value === 'READY TO SHIP') return wmsDate(item.completedDate);
+  if (value === '입고' || value === 'RECEIVED') return wmsDate(item.receivedDate);
+  return '';
+};
+
+const WMS_DATED_STEPS: { field: keyof WmsInvoice; label: string }[] = [
+  { field: 'receivedDate', label: 'RECEIVED' },
+  { field: 'completedDate', label: 'WORK COMPLETED' },
+  { field: 'dispatchedAt', label: 'SENT' },
+  { field: 'droppedAt', label: 'DROPPED' },
+  { field: 'deliveredAt', label: 'DELIVERED' },
+];
+
 export default function PurchaseScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -160,17 +304,49 @@ export default function PurchaseScreen() {
     }
   }, [canViewTotal]);
   const [storePickerOpen, setStorePickerOpen] = useState(false);
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [selectedPeriod, setSelectedPeriod] = useState(() => {
+    const today = new Date();
+    return { month: today.getMonth(), year: today.getFullYear() };
+  });
+  const [pickerYear, setPickerYear] = useState(() => new Date().getFullYear());
   const [result, setResult] = useState<PurchaseResponse | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null);
+  const [wmsResponse, setWmsResponse] = useState<{
+    key: string;
+    invoices: WmsInvoice[];
+  } | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
+
+  // Android back closes the in-place order detail, not the PURCHASE route.
+  // Register only while PURCHASE is focused and a detail is open.
+  useFocusEffect(useCallback(() => {
+    if (Platform.OS !== 'android' || !selectedOrder) return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSelectedOrder(null);
+      return true; // Consume this press so the navigator cannot leave PURCHASE.
+    });
+    return () => subscription.remove();
+  }, [selectedOrder]));
 
   useEffect(() => { scrollRef.current?.scrollTo({ y: 0, animated: false }); }, [storeName]);
 
   // A single permitted department cannot be switched to another department.
   const effectiveDepartment: Department = allowedDepartments.includes(department)
     ? department : (allowedDepartments[0] ?? 'GM');
+  const selectedMonthName = MONTH_NAMES[selectedPeriod.month];
+  const targetTabName = `${selectedMonthName} ${effectiveDepartment === 'GM' ? 'GM' : 'PD'}`;
+  const nextMonth = useCallback(() => {
+    setResult(null);
+    setSelectedPeriod(({ month, year }) => month === 11
+      ? { month: 0, year: year + 1 }
+      : { month: month + 1, year });
+  }, []);
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   // If H changes, immediately remove any store that is no longer permitted.
@@ -210,6 +386,9 @@ export default function PurchaseScreen() {
         const params = [
           `action=purchase`,
           `department=${encodeURIComponent(effectiveDepartment)}`,
+          `month=${encodeURIComponent(selectedMonthName)}`,
+          `year=${encodeURIComponent(selectedPeriod.year)}`,
+          `sheetName=${encodeURIComponent(targetTabName)}`,
           `token=${encodeURIComponent(session.purchaseToken)}`,
           `v=${encodeURIComponent(APP_BUILD_KEY)}`,
         ].join('&');
@@ -223,6 +402,12 @@ export default function PurchaseScreen() {
             : (json.message || json.error || 'Unable to load purchases.');
           throw new Error(message);
         }
+        // Never display another tab/year as if it were the selected period.
+        // Apps Script must return the actual source sheetName and year.
+        if (json.configured !== false &&
+            (json.sheetName?.trim().toUpperCase() !== targetTabName.toUpperCase() || json.year !== selectedPeriod.year)) {
+          throw new Error(`Purchase source not confirmed: ${targetTabName} (${selectedPeriod.year}).`);
+        }
         if (active) setResult(json);
       } catch (err) {
         if (active) {
@@ -235,8 +420,56 @@ export default function PurchaseScreen() {
     };
     void load();
     return () => { active = false; };
-  }, [allowed, effectiveDepartment, refreshKey, session?.purchaseToken, settings.appsScriptUrl]);
+  }, [allowed, effectiveDepartment, selectedMonthName, selectedPeriod.year,
+      targetTabName, refreshKey, session?.purchaseToken, settings.appsScriptUrl]);
 
+
+  // Independent read: a warehouse outage never blocks PURCHASE budgets/cards.
+  const wmsScopeKey = `${effectiveDepartment}:${selectedPeriod.year}:${selectedMonthName}`;
+  useEffect(() => {
+    let active = true;
+    setWmsResponse(null);
+    const base = settings.appsScriptUrl.trim();
+    if (!allowed || !base || !session?.purchaseToken) return () => { active = false; };
+    const loadWms = async () => {
+      try {
+        const params = [
+          'action=purchaseWms',
+          `department=${encodeURIComponent(effectiveDepartment)}`,
+          `month=${encodeURIComponent(selectedMonthName)}`,
+          `year=${encodeURIComponent(selectedPeriod.year)}`,
+          `token=${encodeURIComponent(session.purchaseToken || '')}`,
+          `v=${encodeURIComponent(APP_BUILD_KEY)}`,
+        ].join('&');
+        const response = await fetch(`${base}${base.includes('?') ? '&' : '?'}${params}`);
+        if (!response.ok) return;
+        const json = (await response.json()) as WmsResponse;
+        if (active && json.ok && Array.isArray(json.invoices)) {
+          setWmsResponse({ key: wmsScopeKey, invoices: json.invoices });
+        }
+      } catch {
+        // No placeholder status/date is displayed on a failed WMS lookup.
+      }
+    };
+    void loadWms();
+    return () => { active = false; };
+  }, [allowed, effectiveDepartment, selectedMonthName, selectedPeriod.year,
+      session?.purchaseToken, settings.appsScriptUrl, refreshKey, wmsScopeKey]);
+
+  const wmsByInvoice = useMemo(() => {
+    const map: Record<string, WmsInvoice> = {};
+    if (wmsResponse?.key === wmsScopeKey) {
+      wmsResponse.invoices.forEach((item) => {
+        if (item?.invoiceNumber) map[wmsInvoiceKey(item.invoiceNumber)] = item;
+      });
+    }
+    return map;
+  }, [wmsResponse, wmsScopeKey]);
+  const wmsForOrder = (order: PurchaseOrder): WmsInvoice | null => {
+    const key = wmsInvoiceKey(order.invoice);
+    return wmsByInvoice[key] ||
+      (key.startsWith('JBS ') ? wmsByInvoice[key.slice(4).trim()] : null) || null;
+  };
 
   const currentStore = useMemo(
     () => result?.stores?.find((s) => s.name.trim().toUpperCase() === storeName) ?? null,
@@ -274,6 +507,10 @@ export default function PurchaseScreen() {
     };
     return { budget: sum('budget'), spent: sum('spent'), remaining: sum('remaining') };
   }, [totalRows]);
+  const overviewPalette = useMemo(
+    () => overviewTheme(colors.primary, colors.card),
+    [colors.primary, colors.card],
+  );
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const openLink = async (url: string) => {
@@ -282,45 +519,193 @@ export default function PurchaseScreen() {
     catch { setFailure('Could not open the linked document.'); }
   };
 
-  const renderOrder = (order: PurchaseOrder) => (
-    <View
-      key={order.id}
-      style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-    >
-      <View style={styles.cardTitleRow}>
-        <Text style={styles.vendorLine} numberOfLines={2}>
-          <Text style={[styles.vendor, { color: colors.foreground, fontSize: 13 * fs }]}>{order.vendor || '—'}</Text>
-          <Text style={[styles.date, { color: colors.mutedForeground, fontSize: 11 * fs }]}>{'  '}{order.date}</Text>
-        </Text>
-        <Text style={[styles.total, { color: colors.foreground, fontSize: 13 * fs }]}>{plain(order.total)}</Text>
-      </View>
-      <View style={[styles.divider, { backgroundColor: colors.border }]} />
-      <View style={styles.detailRow}>
-        <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 13 * fs }]}>PO SHEET</Text>
-        <Pressable onPress={() => void openLink(order.poUrl)} disabled={!order.poUrl} style={styles.detailValue}>
-          <Text
-            style={{ color: order.poUrl ? colors.accent : colors.foreground, fontSize: 14 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.poUrl ? 'underline' : 'none' }}
-            numberOfLines={2}
-          >
-            {order.po || '—'}
+  const renderOrder = (order: PurchaseOrder) => {
+    const wms = wmsForOrder(order);
+    const status = wms?.status?.trim();
+    const statusDate = wms ? wmsStatusDate(wms) : '';
+    return (
+      <Pressable
+        key={order.id}
+        onPress={() => setSelectedOrder(order)}
+        accessibilityRole="button"
+        accessibilityLabel={`${order.vendor}, invoice ${order.invoice || 'not issued'}, details`}
+        style={({ pressed }) => [
+          styles.card,
+          { backgroundColor: colors.card, borderColor: colors.border },
+          pressed && styles.pressed,
+        ]}
+      >
+        <View style={styles.cardTitleRow}>
+          <View style={styles.vendorDateRow}>
+            <Text style={[styles.vendor, { color: colors.foreground, fontSize: 15 * fs }]} numberOfLines={1}>
+              {order.vendor}
+            </Text>
+            {!!order.date && (
+              <Text style={[styles.date, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
+                {order.date}
+              </Text>
+            )}
+          </View>
+          <Text style={[styles.total, { color: colors.foreground, fontSize: 15 * fs }]} numberOfLines={1}>
+            {plain(order.total)}
           </Text>
-        </Pressable>
-      </View>
-      <View style={styles.detailRow}>
-        <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 13 * fs }]}>INVOICE</Text>
-        <Pressable onPress={() => void openLink(order.invoiceUrl)} disabled={!order.invoiceUrl} style={styles.detailValue}>
-          <Text
-            style={{ color: order.invoiceUrl ? colors.accent : colors.foreground, fontSize: 14 * fs, fontFamily: 'Inter_600SemiBold', textDecorationLine: order.invoiceUrl ? 'underline' : 'none' }}
-            numberOfLines={2}
-          >
-            {order.invoice || '—'}
-          </Text>
-        </Pressable>
-      </View>
-    </View>
-  );
+        </View>
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+        <View style={styles.cardBottom}>
+          <View style={styles.cardFields}>
+            <View style={styles.detailRow}>
+              <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 13 * fs }]}>PO SHEET</Text>
+              {!!order.po && (
+                <Text style={[styles.cardLink, { color: colors.accent, fontSize: 14 * fs }]} numberOfLines={1}>{order.po}</Text>
+              )}
+            </View>
+            {!!order.invoice && (
+              <View style={styles.detailRow}>
+                <Text style={[styles.detailLabel, { color: colors.mutedForeground, fontSize: 13 * fs }]}>INVOICE</Text>
+                <Text style={[styles.cardLink, { color: colors.accent, fontSize: 14 * fs }]} numberOfLines={1}>{order.invoice}</Text>
+              </View>
+            )}
+          </View>
+          {!!status && (
+            <View style={styles.cardStatusRight}>
+              <View style={[styles.statusBadge, { backgroundColor: colors.primary }]}>
+                <Text style={[styles.statusBadgeText, { fontSize: 11 * fs }]} numberOfLines={2}>
+                  {wmsStatusLabel(status)}
+                </Text>
+              </View>
+              {!!statusDate && (
+                <Text style={[styles.statusDate, { color: colors.mutedForeground, fontSize: 11 * fs }]}>
+                  {statusDate}
+                </Text>
+              )}
+            </View>
+          )}
+        </View>
+      </Pressable>
+    );
+  };
+
+  const detailWms = selectedOrder ? wmsForOrder(selectedOrder) : null;
+  const detailSteps = detailWms
+    ? WMS_DATED_STEPS.flatMap(({ field, label }) => {
+        const raw = detailWms[field];
+        const date = typeof raw === 'string' ? wmsDate(raw) : '';
+        return date ? [{ field, label, date, time: wmsTime(raw as string) }] : [];
+      })
+    : [];
+  const wmsInformation = detailWms ? [
+    { label: 'WMS VENDOR', value: detailWms.vendor },
+    { label: 'DEPARTMENT', value: detailWms.type },
+    { label: 'ASSIGNED STORE', value: detailWms.assignedStoreName },
+    { label: 'BOX COUNT', value: detailWms.totalBoxCount },
+    { label: 'CREATED AT', value: detailWms.createdAt ? [wmsDate(detailWms.createdAt), wmsTime(detailWms.createdAt)].filter(Boolean).join(' ') : null },
+  ].filter((field) => field.value !== null && field.value !== undefined && field.value !== '') : [];
 
   if (!allowed) return <Redirect href="/" />;
+
+  if (selectedOrder) {
+    const detailStatus = detailWms?.status?.trim();
+    const detailStatusDate = detailWms ? wmsStatusDate(detailWms) : '';
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
+        <View style={[styles.detailHeader, { borderBottomColor: colors.border }]}>
+          <Pressable onPress={() => setSelectedOrder(null)} accessibilityRole="button" accessibilityLabel="Back to purchases" style={styles.detailBack}>
+            <Feather name="chevron-left" size={22} color={colors.primary} />
+            <Text style={[styles.detailBackText, { color: colors.primary }]}>PURCHASE</Text>
+          </Pressable>
+          <View style={styles.detailHero}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.detailVendor, { color: colors.foreground, fontSize: 25 * fs }]} numberOfLines={2}>
+                {selectedOrder.vendor}
+              </Text>
+              {!!selectedOrder.date && (
+                <Text style={[styles.detailSub, { color: colors.mutedForeground }]}>ORDER DATE · {selectedOrder.date}</Text>
+              )}
+              {!!selectedOrder.invoice && (
+                <Text style={[styles.detailSub, { color: colors.mutedForeground }]}>INVOICE · {selectedOrder.invoice}</Text>
+              )}
+            </View>
+            {!!detailStatus && (
+              <View style={styles.cardStatusRight}>
+                <View style={[styles.statusBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={styles.statusBadgeText}>{wmsStatusLabel(detailStatus)}</Text>
+                </View>
+                {!!detailStatusDate && (
+                  <Text style={[styles.statusDate, { color: colors.mutedForeground }]}>{detailStatusDate}</Text>
+                )}
+              </View>
+            )}
+          </View>
+          <Text style={[styles.detailAmount, { color: colors.foreground, fontSize: 22 * fs }]}>
+            {money(selectedOrder.total)}
+          </Text>
+        </View>
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.detailScrollContent}>
+          {!!(selectedOrder.poUrl || selectedOrder.invoiceUrl) && (
+            <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.detailSectionTitle, { color: colors.mutedForeground }]}>DOCUMENTS</Text>
+              <View style={styles.documentRow}>
+                {!!selectedOrder.poUrl && (
+                  <Pressable onPress={() => void openLink(selectedOrder.poUrl)} style={[styles.documentButton, { borderColor: colors.border, backgroundColor: colors.background }]} accessibilityRole="link">
+                    <Feather name="file-text" size={21} color={colors.primary} />
+                    <Text style={[styles.documentText, { color: colors.foreground }]}>PO SHEET</Text>
+                  </Pressable>
+                )}
+                {!!selectedOrder.invoiceUrl && (
+                  <Pressable onPress={() => void openLink(selectedOrder.invoiceUrl)} style={[styles.documentButton, { borderColor: colors.border, backgroundColor: colors.background }]} accessibilityRole="link">
+                    <Feather name="file-text" size={21} color={colors.primary} />
+                    <Text style={[styles.documentText, { color: colors.foreground }]}>PDF FILE</Text>
+                  </Pressable>
+                )}
+              </View>
+            </View>
+          )}
+          <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.detailSectionTitle, { color: colors.mutedForeground }]}>ORDER INFORMATION</Text>
+            <View style={styles.detailInfoGrid}>
+              {!!selectedOrder.invoice && <View style={styles.infoCell}><Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>INVOICE</Text><Text style={[styles.infoValue, { color: colors.foreground }]}>{selectedOrder.invoice}</Text></View>}
+              {!!selectedOrder.po && <View style={styles.infoCell}><Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>PO SHEET</Text><Text style={[styles.infoValue, { color: colors.foreground }]}>{selectedOrder.po}</Text></View>}
+              {!!selectedOrder.date && <View style={styles.infoCell}><Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>ORDER DATE</Text><Text style={[styles.infoValue, { color: colors.foreground }]}>{selectedOrder.date}</Text></View>}
+              <View style={styles.infoCell}><Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>AMOUNT</Text><Text style={[styles.infoValue, { color: colors.foreground }]}>{money(selectedOrder.total)}</Text></View>
+            </View>
+          </View>
+          {detailSteps.length > 0 && (
+            <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.detailSectionTitle, { color: colors.mutedForeground }]}>WAREHOUSE PROGRESS</Text>
+              {detailSteps.map((step, index) => (
+                <View key={step.field} style={styles.timelineRow}>
+                  <View style={styles.timelineTrack}>
+                    <View style={[styles.timelineDot, { backgroundColor: colors.primary }]}>
+                      <Feather name="check" size={11} color="#FFFFFF" />
+                    </View>
+                    {index < detailSteps.length - 1 && <View style={[styles.timelineLine, { backgroundColor: colors.border }]} />}
+                  </View>
+                  <Text style={[styles.timelineName, { color: colors.foreground }]}>{step.label}</Text>
+                  <View style={styles.timelineDateArea}>
+                    <Text style={[styles.timelineDate, { color: colors.foreground }]}>{step.date}</Text>
+                    {!!step.time && <Text style={[styles.timelineTime, { color: colors.mutedForeground }]}>{step.time}</Text>}
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+          {wmsInformation.length > 0 && (
+            <View style={[styles.detailPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.detailSectionTitle, { color: colors.mutedForeground }]}>WAREHOUSE INFORMATION</Text>
+              <View style={styles.detailInfoGrid}>
+                {wmsInformation.map((field) => (
+                  <View key={field.label} style={styles.infoCell}>
+                    <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>{field.label}</Text>
+                    <Text style={[styles.infoValue, { color: colors.foreground }]}>{String(field.value)}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topPad }]}>
@@ -333,14 +718,14 @@ export default function PurchaseScreen() {
                 disabled={allowedStores.length < 2}
                 style={({ pressed }) => [styles.storeTitlePress, pressed && styles.pressed]}
                 accessibilityRole="button"
-                accessibilityLabel={`Selected store ${storeName}. Tap to select next store.`}
+                accessibilityLabel={`Selected store ${isTotal ? 'OVERVIEW' : storeName}. Tap to select next store.`}
                 testID="purchase-store-next"
               >
                 <Text
                   style={[styles.heading, { color: colors.primary, fontSize: 19 * fs }]}
                   numberOfLines={1}
                 >
-                  {storeName}
+                  {isTotal ? 'OVERVIEW' : storeName}
                 </Text>
               </Pressable>
               <Pressable
@@ -354,11 +739,28 @@ export default function PurchaseScreen() {
                 <Feather name="chevron-down" size={20} color={colors.primary} />
               </Pressable>
             </View>
-            {!!result?.month && (
-              <Text style={[styles.month, isTotal && { marginTop: 6 }, { color: colors.mutedForeground, fontSize: 14 * fs }]}>
-                {result.month} {new Date().getFullYear()}
-              </Text>
-            )}
+            <View style={[styles.storeControls, isTotal && { marginTop: 6 }]}>
+              <Pressable
+                onPress={nextMonth}
+                style={({ pressed }) => [styles.storeTitlePress, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`Selected ${selectedMonthName} ${selectedPeriod.year}. Tap for next month.`}
+                testID="purchase-month-next"
+              >
+                <Text style={[styles.month, { color: colors.mutedForeground, fontSize: 14 * fs }]}>
+                  {selectedMonthName} {selectedPeriod.year}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { setPickerYear(selectedPeriod.year); setMonthPickerOpen(true); }}
+                style={({ pressed }) => [styles.storeChevron, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Open month and year dropdown"
+                testID="purchase-month-dropdown"
+              >
+                <Feather name="chevron-down" size={20} color={colors.primary} style={{ opacity: 0 }} />
+              </Pressable>
+            </View>
           </View>
           <View style={styles.toolbarRight}>
             {allowedDepartments.length > 1 ? (
@@ -427,29 +829,42 @@ export default function PurchaseScreen() {
         )}
         {!loading && !failure && result?.configured !== false && isTotal && (
           <View style={styles.totalWrap}>
-            <View style={[styles.totalCard, styles.totalSummary, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={styles.totalLegend}>
-                <Text style={[styles.totalLegendText, { color: colors.mutedForeground, fontSize: 10 * fs }]}>BUDGET / SPENT</Text>
-                <Text style={[styles.totalLegendText, { color: colors.mutedForeground, fontSize: 10 * fs }]}>REMAINING</Text>
+            <View style={[styles.overviewSummary, { backgroundColor: overviewPalette.card, borderColor: overviewPalette.card }]}>
+              {/* Subtle glow and legible summary text follow the active theme. */}
+              <View pointerEvents="none" style={[styles.overviewSummaryGlow, { backgroundColor: overviewPalette.glow, opacity: 0.065 }]} />
+              <View style={styles.overviewMetrics}>
+                <View style={styles.overviewMetric}>
+                  <Text style={[styles.overviewMetricLabel, { color: '#FFFFFF', fontSize: 11 * fs }]}>BUDGET</Text>
+                  <Text style={[styles.overviewMetricAmount, { color: '#FFFFFF', fontSize: 19 * fs }]}
+                    numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                    {plain(totalSum.budget)}
+                  </Text>
+                </View>
+                <View style={[styles.overviewMetricSeparator, { backgroundColor: overviewPalette.divider }]} />
+                <View style={styles.overviewMetric}>
+                  <Text style={[styles.overviewMetricLabel, { color: '#FFFFFF', fontSize: 11 * fs }]}>SPENT</Text>
+                  <Text style={[styles.overviewMetricAmount, { color: '#FFFFFF', fontSize: 19 * fs }]}
+                    numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                    {plain(totalSum.spent)}
+                  </Text>
+                </View>
               </View>
-              <View style={[styles.totalLine, { marginTop: 4 }]}>
-                <Text style={[styles.totalName, { color: colors.foreground, fontSize: 16 * fs }]} numberOfLines={1}>
-                  TOTAL
-                </Text>
-                <MoneyText
-                  value={totalSum.remaining}
-                  size={20 * fs}
-                  color={totalSum.remaining != null && totalSum.remaining < 0 ? colors.destructive : colors.foreground}
-                  style={styles.totalAmount}
-                />
+              <View style={styles.overviewRemainingRow}>
+                <View style={[styles.overviewRemainingPill, { backgroundColor: overviewPalette.pill }]}>
+                  <Text style={[styles.overviewRemainingLabel, { color: overviewPalette.pillText, fontSize: 11 * fs }]}>REMAINING</Text>
+                  <View style={[styles.overviewRemainingSeparator, { backgroundColor: overviewPalette.pillDivider }]} />
+                  <MoneyText
+                    value={totalSum.remaining}
+                    size={19 * fs}
+                    color={totalSum.remaining != null && totalSum.remaining < 0 ? colors.destructive : overviewPalette.remainingGreen}
+                    style={styles.overviewRemainingAmount}
+                  />
+                </View>
               </View>
-              <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
-                <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(totalSum.budget)}</Text> / {plain(totalSum.spent)}
-              </Text>
             </View>
 
-            <View style={[styles.totalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              {totalRows.map((row, index) => (
+            <View style={styles.overviewStoreList}>
+              {totalRows.map((row) => (
                 <Pressable
                   key={row.name}
                   onPress={() => setStoreName(row.name)}
@@ -458,28 +873,34 @@ export default function PurchaseScreen() {
                   accessibilityLabel={`Open ${row.name}`}
                   testID={`purchase-total-row-${row.name}`}
                   style={({ pressed }) => [
-                    styles.totalItem,
-                    index < totalRows.length - 1 && {
-                      borderBottomWidth: StyleSheet.hairlineWidth,
-                      borderBottomColor: colors.border,
-                    },
-                    pressed && [styles.totalItemPressed, { backgroundColor: colors.background }],
+                    styles.overviewStoreCard,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                    pressed && styles.pressed,
                   ]}
                 >
-                  <View style={styles.totalLine}>
-                    <Text style={[styles.totalName, { color: colors.foreground, fontSize: 16 * fs }]} numberOfLines={1}>
+                  <View style={styles.overviewStoreMark}>
+                    <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, { backgroundColor: colors.primary, opacity: 0.10 }]} />
+                    <Text style={[styles.overviewStoreMarkText, { color: colors.foreground, fontSize: 15 * fs }]}>
+                      {STORE_MARKS[row.name] ?? row.name.slice(0, 2)}
+                    </Text>
+                  </View>
+                  <View style={styles.overviewStoreInfo}>
+                    <Text style={[styles.overviewStoreName, { color: colors.foreground, fontSize: 14 * fs }]}
+                      numberOfLines={1} adjustsFontSizeToFit>
                       {row.name}
                     </Text>
-                    <MoneyText
-                      value={row.remaining}
-                      size={16 * fs}
-                      color={row.remaining != null && row.remaining < 0 ? colors.destructive : colors.foreground}
-                      style={styles.totalAmount}
-                    />
+                    <Text style={[styles.overviewStoreFigures, { color: colors.mutedForeground, fontSize: 11 * fs }]}
+                      numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+                      {plain(row.budget)} / {plain(row.spent)}
+                    </Text>
                   </View>
-                  <Text style={[styles.totalSub, { color: colors.mutedForeground, fontSize: 12 * fs }]} numberOfLines={1}>
-                    <Text style={{ fontFamily: 'Inter_700Bold' }}>{plain(row.budget)}</Text> / {plain(row.spent)}
-                  </Text>
+                  <MoneyText
+                    value={row.remaining}
+                    size={15 * fs}
+                    color={row.remaining != null && row.remaining < 0 ? colors.destructive : colors.foreground}
+                    style={styles.overviewStoreRemaining}
+                  />
+                  <Feather name="chevron-right" size={20} color={colors.mutedForeground} />
                 </Pressable>
               ))}
             </View>
@@ -499,6 +920,56 @@ export default function PurchaseScreen() {
           </>
         )}
       </ScrollView>
+
+      <Modal
+        visible={monthPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMonthPickerOpen(false)}
+      >
+        <Pressable style={styles.pickerOverlay} onPress={() => setMonthPickerOpen(false)}>
+          <Pressable style={[styles.pickerSheet, { backgroundColor: colors.card }]} onPress={() => {}}>
+            <Text style={[styles.pickerTitle, { color: colors.mutedForeground }]}>SELECT MONTH / YEAR</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Pressable onPress={() => setPickerYear((y) => y - 1)} style={styles.storeChevron} accessibilityLabel="Previous year">
+                <Feather name="chevron-left" size={20} color={colors.primary} />
+              </Pressable>
+              <Text style={[styles.heading, { color: colors.foreground, fontSize: 18 * fs }]}>{pickerYear}</Text>
+              <Pressable onPress={() => setPickerYear((y) => y + 1)} style={styles.storeChevron} accessibilityLabel="Next year">
+                <Feather name="chevron-right" size={20} color={colors.primary} />
+              </Pressable>
+            </View>
+            <FlatList
+              data={[...MONTH_NAMES]}
+              keyExtractor={(name) => name}
+              renderItem={({ item, index }) => {
+                const selected = selectedPeriod.year === pickerYear && selectedPeriod.month === index;
+                return (
+                  <Pressable
+                    style={({ pressed }) => [styles.pickerOption, pressed && styles.pressed]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => {
+                      setSelectedPeriod({ month: index, year: pickerYear });
+                      setResult(null);
+                      setMonthPickerOpen(false);
+                    }}
+                  >
+                    <Text style={{
+                      color: selected ? colors.accent : colors.foreground,
+                      fontSize: 15 * fs,
+                      fontFamily: selected ? 'Inter_600SemiBold' : 'Inter_400Regular',
+                    }}>
+                      {item}
+                    </Text>
+                    {selected && <Feather name="check" size={16} color={colors.accent} />}
+                  </Pressable>
+                );
+              }}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={storePickerOpen}
@@ -529,7 +1000,7 @@ export default function PurchaseScreen() {
                       fontFamily: item === storeName ? 'Inter_600SemiBold' : 'Inter_400Regular',
                     }}
                   >
-                    {item}
+                    {item === TOTAL_STORE ? 'OVERVIEW' : item}
                   </Text>
                   {item === storeName && <Feather name="check" size={16} color={colors.accent} />}
                 </Pressable>
@@ -572,13 +1043,20 @@ const styles = StyleSheet.create({
   counterValue: { fontSize: 17, fontFamily: 'Inter_700Bold' },
   scroll: { flex: 1 },
   scrollContent: { padding: 12, paddingBottom: 100 },
-  card: { paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderRadius: 10, marginBottom: 8 },
-  cardTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 },
-  date: { fontFamily: 'Inter_500Medium' },
-  vendor: { fontFamily: 'Inter_700Bold' },
-  vendorLine: { flex: 1 },
-  divider: { height: 1, marginVertical: 4 },
-  detailRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 2 },
+  card: { paddingHorizontal: 14, paddingVertical: 10, borderWidth: 1, borderRadius: 14, marginBottom: 10 },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
+  vendorDateRow: { flex: 1, flexDirection: 'row', alignItems: 'baseline', minWidth: 0 },
+  date: { fontFamily: 'Inter_500Medium', marginLeft: 18, flexShrink: 0 },
+  vendor: { fontFamily: 'Inter_700Bold', flexShrink: 1 },
+  cardBottom: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 9 },
+  cardFields: { flex: 1, minWidth: 0 },
+  cardLink: { flexShrink: 1, fontFamily: 'Inter_600SemiBold', textDecorationLine: 'underline' },
+  cardStatusRight: { minWidth: 94, alignItems: 'flex-end', justifyContent: 'flex-start' },
+  statusBadge: { minWidth: 80, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 4, alignItems: 'center' },
+  statusBadgeText: { color: '#FFFFFF', fontSize: 11, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  statusDate: { fontFamily: 'Inter_500Medium', fontSize: 11, marginTop: 4, textAlign: 'right', alignSelf: 'flex-end' },
+  divider: { height: 1, marginVertical: 8 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3 },
   detailLabel: { width: 90, fontFamily: 'Inter_500Medium' },
   detailValue: { flex: 1, alignItems: 'flex-start' },
   total: { fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] },
@@ -587,15 +1065,51 @@ const styles = StyleSheet.create({
   empty: { paddingVertical: 28, textAlign: 'center', fontFamily: 'Inter_400Regular' },
   spinner: { marginVertical: 28 },
   notice: { padding: 16, borderWidth: 1, borderRadius: 10, marginBottom: 12 },
-  totalWrap: { marginHorizontal: -6, marginTop: -6, gap: 6 },
-  totalCard: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, overflow: 'hidden' },
-  totalSummary: { paddingTop: 8, paddingBottom: 10 },
-  totalLegend: { flexDirection: 'row', justifyContent: 'space-between' },
-  totalLegendText: { fontFamily: 'Inter_600SemiBold', letterSpacing: 0.5 },
-  totalLine: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  totalName: { fontFamily: 'Inter_400Regular', flexShrink: 0 },
-  totalAmount: { flexShrink: 1, marginLeft: 12, textAlign: 'right' },
-  totalSub: { fontFamily: 'Inter_500Medium', fontVariant: ['tabular-nums'], marginTop: 2 },
-  totalItem: { paddingVertical: 12 },
-  totalItemPressed: { marginHorizontal: -12, paddingHorizontal: 12 },
+  detailHeader: { paddingHorizontal: 18, paddingTop: 15, paddingBottom: 18, borderBottomWidth: 1 },
+  detailBack: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 3, paddingVertical: 6 },
+  detailBackText: { fontFamily: 'Inter_700Bold', fontSize: 14 },
+  detailHero: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginTop: 17 },
+  detailVendor: { fontFamily: 'Inter_700Bold' },
+  detailSub: { fontFamily: 'Inter_500Medium', fontSize: 12, marginTop: 5 },
+  detailAmount: { fontFamily: 'Inter_700Bold', marginTop: 10 },
+  detailScrollContent: { padding: 14, paddingBottom: 80 },
+  detailPanel: { borderWidth: 1, borderRadius: 14, padding: 16, marginBottom: 12 },
+  detailSectionTitle: { fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.8, marginBottom: 14 },
+  documentRow: { flexDirection: 'row', gap: 9 },
+  documentButton: { flex: 1, minWidth: 0, borderWidth: 1, borderRadius: 10, padding: 11, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  documentText: { fontFamily: 'Inter_700Bold', fontSize: 12, flexShrink: 1 },
+  detailInfoGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 16 },
+  infoCell: { width: '50%', paddingRight: 10 },
+  infoLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 11, letterSpacing: 0.4 },
+  infoValue: { fontFamily: 'Inter_700Bold', fontSize: 13, marginTop: 4 },
+  timelineRow: { minHeight: 60, flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  timelineTrack: { alignItems: 'center', width: 18, alignSelf: 'stretch' },
+  timelineDot: { width: 17, height: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  timelineLine: { flex: 1, width: 1, minHeight: 20 },
+  timelineName: { fontFamily: 'Inter_700Bold', fontSize: 13, flex: 1 },
+  timelineDateArea: { alignItems: 'flex-end' },
+  timelineDate: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
+  timelineTime: { fontFamily: 'Inter_400Regular', fontSize: 11, marginTop: 3 },
+  // OVERVIEW: one theme-washed summary and distinct neutral store cards.
+  totalWrap: { marginHorizontal: -3, marginTop: -1, gap: 10 },
+  overviewSummary: { borderWidth: 1, borderRadius: 18, padding: 9, overflow: 'hidden' },
+  overviewSummaryGlow: { position: 'absolute', right: -64, top: -72, width: 230, height: 230, borderRadius: 115 },
+  overviewMetrics: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 5, paddingTop: 1, paddingBottom: 6 },
+  overviewMetric: { flex: 1, minWidth: 0, gap: 4 },
+  overviewMetricLabel: { fontFamily: 'Inter_600SemiBold', letterSpacing: 0.4 },
+  overviewMetricAmount: { fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] },
+  overviewMetricSeparator: { width: 1, height: 34 },
+  overviewRemainingRow: { flexDirection: 'row', alignItems: 'center', minHeight: 36 },
+  overviewRemainingPill: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', paddingLeft: 13, paddingRight: 18, height: 30, borderRadius: 10, gap: 10 },
+  overviewRemainingLabel: { fontFamily: 'Inter_600SemiBold', flexShrink: 0 },
+  overviewRemainingSeparator: { height: 16, width: 1 },
+  overviewRemainingAmount: { flex: 1, minWidth: 0, textAlign: 'center' },
+  overviewStoreList: { gap: 6 },
+  overviewStoreCard: { minHeight: 65, borderRadius: 15, borderWidth: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, gap: 10 },
+  overviewStoreMark: { width: 43, height: 43, borderRadius: 12, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  overviewStoreMarkText: { fontFamily: 'Inter_700Bold', letterSpacing: 0.2 },
+  overviewStoreInfo: { flex: 1, minWidth: 0, gap: 3 },
+  overviewStoreName: { fontFamily: 'Inter_700Bold' },
+  overviewStoreFigures: { fontFamily: 'Inter_500Medium', fontVariant: ['tabular-nums'] },
+  overviewStoreRemaining: { flexShrink: 1, maxWidth: '36%', textAlign: 'right' },
 });

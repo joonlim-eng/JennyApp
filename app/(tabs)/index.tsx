@@ -38,7 +38,7 @@ const BANNER_IDS = [
 const BANNER_BUST = Date.now(); //TIME APPLIED
 const bannerUrl = (id: string) => `https://drive.google.com/thumbnail?id=${id}&sz=w1600&t=${BANNER_BUST}`;
 const BANNER_INTERVAL = 5500; // INTERVAL
-const H_MARGIN = 16; // 본문 좌우 여백 (cart/scan과 동일)
+const H_MARGIN = 8; // 본문 좌우 여백 (cart/scan과 동일)  마진
 
 function notify(title: string, msg: string) {
   if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
@@ -141,7 +141,7 @@ export default function HomeScreen() {
   return (
     <View style={[styles.container, { backgroundColor: c('home.bg', colors.background), paddingTop: topPad }]}>
       
-      <View style={[styles.header, { paddingHorizontal: 16, paddingTop: 0 }]}>
+      <View style={[styles.header, { paddingHorizontal: 8, paddingTop: 0 }]}>  //상단 마진
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={[styles.brand, { color: c('home.brandColor', colors.primary), fontSize: 20 * fs }]} onPress={handleCheckVersion}>
@@ -441,7 +441,7 @@ function BannerCarousel({ height }: { height: number }) {
   if (ids.length === 0 || height <= 0) return null; // 그림이 없거나 TOTAL 높이 측정 전이면 숨김
 
   return (
-    <View style={{ width, height, marginTop: 4 }}>
+    <View style={{ width, height, marginTop: 4 }}>  //배너
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -733,8 +733,11 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   userEmail: { fontFamily: 'Inter_400Regular', marginTop: 2 },
   logoutBtn: { padding: 8 },
-  // TOTAL 띠
-  totalBand: { paddingHorizontal: 16, paddingVertical: 10 },
+  // TOTAL 카드
+  totalBand: {
+  paddingHorizontal: 16, paddingVertical: 10,
+  borderTopLeftRadius: 16,  borderTopRightRadius: 16,  //타원
+},
   totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
   deptPill: { height: 30, paddingHorizontal: 14, borderRadius: 15, justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.22)' },
   totalLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 11, fontFamily: 'Inter_600SemiBold', letterSpacing: 3 },
@@ -748,7 +751,7 @@ const styles = StyleSheet.create({
   bannerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)' },
   bannerDotOn: { width: 16, backgroundColor: '#fff' },
   // STORE / VENDOR
-  selectGroup: { gap: 5, marginTop: 10 },
+  selectGroup: { gap: 5, marginTop: 20 },
   section: { marginBottom: 12 },
   sectionLabel: { fontSize: 11, fontFamily: 'Inter_700SemiBold', letterSpacing: 1.2, marginBottom: 6 },
   toggleRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 2 },
@@ -758,9 +761,9 @@ const styles = StyleSheet.create({
   buttonGrid: { flexDirection: 'row', gap: 2.5, paddingHorizontal: 0, transform: [{ translateY: -40 }] },
   actionWrap: { flex: 1, paddingBottom: 4 },
   actionDim: { opacity: 0.42 },
-  actionRing: { position: 'absolute', top: -4, left: 0, right: 0, bottom: -4, borderRadius: 0, borderWidth: 2 },
-  actionBase: { position: 'absolute', top: 4, left: 0, right: 0, bottom: 0, borderRadius: 0 },
-  actionBtn: { aspectRatio: 1.2, borderRadius: 0, alignItems: 'center', justifyContent: 'center' },
+  actionRing: { position: 'absolute', top: -4, left: 0, right: 0, bottom: -4, borderRadius: 4, borderWidth: 2 },
+  actionBase: { position: 'absolute', top: 4, left: 0, right: 0, bottom: 0, borderRadius: 4 },
+  actionBtn: { aspectRatio: 1.2, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   actionIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.35)' },
   actionLabel: { color: '#fff', fontFamily: 'Inter_700Bold', letterSpacing: 0.8, paddingHorizontal: 4 },
   actionBadge: { position: 'absolute', top: -7, right: -5, minWidth: 22, height: 22, paddingHorizontal: 6, borderRadius: 11, borderWidth: 2, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 3, shadowOffset: { width: 0, height: 2 }, elevation: 3 },

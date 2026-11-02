@@ -30,6 +30,7 @@ function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerBackTitle: 'Back' }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="webview" options={{ title: 'WebView' }} />
       <Stack.Screen name="login" options={{ headerShown: false }} />
     </Stack>
   );

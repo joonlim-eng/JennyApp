@@ -1,4 +1,4 @@
-// 최종 수정: 2026-10-31 01:24 AM(CT) 배포  ANNIE EXCEL
+// 최종 수정: 2026-11-01 19:24 PM(CT) 배포
 var SS = SpreadsheetApp.getActiveSpreadsheet();
 function doGet(e) {
   
@@ -48,7 +48,18 @@ function doGet(e) {
       return json_({ ok: true, email: data.email, role: data.role, n: data.n, purchaseToken: createPurchaseToken_(data.email) });
     }
     // ?vendor=NAME → 그 벤더 상품만 (벤더 선택 시 동기화 모드용), ?scope=light → 상품 제외 전체
-    if (action === 'purchase') return json_(getPurchaseData_(e.parameter.token, e.parameter.department));
+    if (action === 'purchase') return json_(getPurchaseData_(
+      e.parameter.token,
+      e.parameter.department,
+      e.parameter.month,
+      e.parameter.year
+    ));
+    if (action === 'purchaseWms') return json_(getPurchaseWmsData_(
+      e.parameter.token,
+      e.parameter.department,
+      e.parameter.month,
+      e.parameter.year
+    ));
     if (action === 'purchaseAccess') return json_(getPurchaseAccess_(e.parameter.token));
     if (action === 'data') return json_(getData_(e.parameter.scope, e.parameter.vendor));
     if (action === 'users') return json_({ users: getUsers_() });
@@ -1279,8 +1290,13 @@ var PURCHASE_DEPARTMENTS_ = ['GM', 'PRODUCT'];
 // Map the existing department/badge names to spreadsheet tab suffixes.
 var PURCHASE_TAB_SUFFIX_ = { GM: 'GM', PRODUCT: 'PD' };
 
-// Run manually from the Apps Script editor. Read-only; no web endpoint.
-var PURCHASE_TAB_SUFFIX_ = { GM: 'GM', PRODUCT: 'PD' };
+// This source spreadsheet contains the 2026 monthly tabs only.
+// Do not reuse its tab names for another year without an explicit archive mapping.
+var PURCHASE_SOURCE_YEAR_ = 2026;
+var PURCHASE_MONTH_NAMES_ = [
+  'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+  'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
+];
 
 // PURCHASE access is controlled by the USERS sheet.
 // G column: GM, PRODUCT, or ALL.
@@ -1532,7 +1548,7 @@ function purchaseLinksFromApi_(sourceId, sheetName, neededRows) {
   return found;
 }
 
-function getPurchaseData_(token, requestedDepartment) {
+function getPurchaseData_(token, requestedDepartment, requestedMonth, requestedYear) {
   var purchaseStartedAt = Date.now();
   var email = verifiedPurchaseEmail_(token);
   if (!email) {
@@ -1556,10 +1572,33 @@ function getPurchaseData_(token, requestedDepartment) {
     return { ok: false, error: 'PURCHASE_ACCESS_DENIED', message: 'Access to ' + department + ' purchases is not granted.' };
   }
 
-  var month = Utilities.formatDate(new Date(), 'America/Chicago', 'MMMM').toUpperCase();
-  var sheetName = month + ' ' + PURCHASE_TAB_SUFFIX_[department]; // GM -> OCTOBER GM; PRODUCT -> OCTOBER PD
+  // The requested month decides the tab. Never trust a client-provided sheetName.
+  var todayMonth = Utilities.formatDate(new Date(), TIMEZONE, 'MMMM').toUpperCase();
+  var todayYear = Number(Utilities.formatDate(new Date(), TIMEZONE, 'yyyy'));
+  var month = purchaseUpper_(requestedMonth || todayMonth);
+
+  if (PURCHASE_MONTH_NAMES_.indexOf(month) === -1) {
+    return { ok: false, error: 'PURCHASE_INVALID_MONTH', message: 'Invalid purchase month: ' + month };
+  }
+
+  var yearText = String(requestedYear == null || requestedYear === '' ? todayYear : requestedYear).trim();
+  if (!/^\d{4}$/.test(yearText)) {
+    return { ok: false, error: 'PURCHASE_INVALID_YEAR', message: 'Invalid purchase year.' };
+  }
+
+  var year = Number(yearText);
+  if (year !== PURCHASE_SOURCE_YEAR_) {
+    return {
+      ok: false,
+      error: 'PURCHASE_YEAR_UNAVAILABLE',
+      message: 'Purchase source for ' + year + ' is not configured.'
+    };
+  }
+
+  var sheetName = month + ' ' + PURCHASE_TAB_SUFFIX_[department];
   var source = SpreadsheetApp.openById(PURCHASE_SOURCE_ID_);
   var sh = source.getSheetByName(sheetName);
+
   if (!sh) {
     return { ok: false, error: 'PURCHASE_MONTH_MISSING', message: 'Missing ' + sheetName + ' tab in purchase source.' };
   }
@@ -1687,11 +1726,115 @@ function getPurchaseData_(token, requestedDepartment) {
     totalMs: Date.now() - purchaseStartedAt
   }));
   return {
-    ok: true, configured: true, month: month, department: department,
+    ok: true, configured: true, month: month, year: year, department: department,
     sheetName: sheetName,
     allowedDepartments: access.sheets.slice(),
     stores: orderNames.map(function (name) { return stores[name]; }),
     cards: cards
+  };
+}
+
+/* ======================== PURCHASE / WMS (READ ONLY) ======================== */
+
+// Reuses the warehouse app's existing read API; does not write to either system.
+// The response is restricted to invoices in the signed-in user's authorized
+// department, month and stores. The original WMS response is never forwarded.
+var PURCHASE_WMS_API_URL_ = 'https://logistics-flow-tracker.replit.app/api/invoices';
+
+function getPurchaseWmsData_(token, requestedDepartment, requestedMonth, requestedYear) {
+  var email = verifiedPurchaseEmail_(token);
+  if (!email) return { ok: false, error: 'PURCHASE_LOGIN_REQUIRED' };
+
+  var user = getUsers_().filter(function (u) {
+    return String(u.email || '').trim().toLowerCase() === email;
+  })[0];
+  var access = user && purchaseAclForUser_(email, user.role);
+  if (!access) return { ok: false, error: 'PURCHASE_ACCESS_DENIED' };
+
+  var department = purchaseUpper_(requestedDepartment);
+  if (access.sheets.indexOf(department) === -1) {
+    return { ok: false, error: 'PURCHASE_ACCESS_DENIED' };
+  }
+  var month = purchaseUpper_(requestedMonth);
+  var yearText = String(requestedYear == null ? '' : requestedYear).trim();
+  if (PURCHASE_MONTH_NAMES_.indexOf(month) === -1 ||
+      !/^\d{4}$/.test(yearText) || Number(yearText) !== PURCHASE_SOURCE_YEAR_) {
+    return { ok: false, error: 'PURCHASE_INVALID_PERIOD' };
+  }
+
+  var sheetName = month + ' ' + PURCHASE_TAB_SUFFIX_[department];
+  var sh = SpreadsheetApp.openById(PURCHASE_SOURCE_ID_).getSheetByName(sheetName);
+  if (!sh) return { ok: false, error: 'PURCHASE_MONTH_MISSING' };
+
+  // Validate invoice access from the actual purchase records, not client input.
+  // A=date, B=ship-to, C=store, F=invoice. Only dated and permitted rows count.
+  var wanted = {};
+  var lastRow = sh.getLastRow();
+  if (lastRow >= 3) {
+    var rows = sh.getRange(3, 1, lastRow - 2, 6).getDisplayValues();
+    rows.forEach(function (row) {
+      if (!String(row[0] || '').trim()) return;
+      var store = String(row[2] || '').trim() || String(row[1] || '').trim();
+      if (!purchaseStoreAllowed_(store, access.stores)) return;
+      var invoice = purchaseUpper_(row[5]);
+      if (invoice) wanted[invoice] = true;
+    });
+  }
+
+  if (!Object.keys(wanted).length) {
+    return { ok: true, department: department, month: month, year: Number(yearText), invoices: [] };
+  }
+
+  var response;
+  try {
+    response = UrlFetchApp.fetch(PURCHASE_WMS_API_URL_, {
+      method: 'get',
+      followRedirects: true,
+      muteHttpExceptions: true,
+      headers: { Accept: 'application/json' }
+    });
+  } catch (err) {
+    console.warn('WMS fetch failed: ' + String(err));
+    return { ok: false, error: 'WMS_UNAVAILABLE' };
+  }
+  if (response.getResponseCode() !== 200) {
+    console.warn('WMS HTTP ' + response.getResponseCode());
+    return { ok: false, error: 'WMS_UNAVAILABLE' };
+  }
+
+  var list;
+  try {
+    list = JSON.parse(response.getContentText());
+  } catch (err) {
+    return { ok: false, error: 'WMS_BAD_RESPONSE' };
+  }
+  if (!Array.isArray(list)) return { ok: false, error: 'WMS_BAD_RESPONSE' };
+
+  var wmsType = department === 'PRODUCT' ? 'PRODUCTS' : 'GM';
+  var mapped = {};
+  list.forEach(function (item) {
+    if (!item || typeof item !== 'object') return;
+    var invoice = purchaseUpper_(item.invoiceNumber);
+    if (!invoice || !wanted[invoice] || purchaseUpper_(item.type) !== wmsType) return;
+    // Return only fields the JENNY detail screen can show. Omit null/blank.
+    var record = { invoiceNumber: String(item.invoiceNumber).trim() };
+    [
+      'vendor', 'type', 'status', 'assignedStoreName', 'receivedDate',
+      'completedDate', 'dispatchedAt', 'droppedAt', 'deliveredAt',
+      'createdAt', 'totalBoxCount'
+    ].forEach(function (field) {
+      var value = item[field];
+      if (value !== null && value !== undefined && value !== '') record[field] = value;
+    });
+    mapped[invoice] = record;
+  });
+
+  return {
+    ok: true,
+    department: department,
+    month: month,
+    year: Number(yearText),
+    invoices: Object.keys(mapped).map(function (key) { return mapped[key]; })
   };
 }
 

@@ -37,9 +37,11 @@ const FEATHER: Record<string, React.ReactNode> = {
       <Line x1={12} y1={16} x2={12.01} y2={16} />
     </>
   ),
-  check: <Polyline points="20 6 9 17 4 12" />,
+  check: <Polyline points="20 6 9 17 4 12" />,   //화살표
   'chevron-down': <Polyline points="6 9 12 15 18 9" />,
   'chevron-up': <Polyline points="18 15 12 9 6 15" />,
+  'chevron-left': <Polyline points="15 18 9 12 15 6" />,
+  'chevron-right': <Polyline points="9 18 15 12 9 6" />,
   download: (
     <>
       <Path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
