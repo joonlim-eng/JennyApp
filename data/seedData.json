@@ -100,8 +100,8 @@
       }
     },
     {
-      "id": "BEESALES",
-      "name": "BEESALES",
+      "id": "BEE SALES",
+      "name": "BEE SALES",
       "salesPerson": "이종화",
       "email": "john@beesales.com",
       "map": {
@@ -207,20 +207,6 @@
         "codeCol": "B",
         "descCol": "C",
         "costCol": "D",
-        "imageCol": "I",
-        "qtyCol": "1"
-      }
-    },
-    {
-      "id": "NICKA K II",
-      "name": "NICKA K II",
-      "salesPerson": "김혜리",
-      "email": "harry.kim@nicka.com",
-      "map": {
-        "upcCol": "G",
-        "codeCol": "B",
-        "descCol": "C",
-        "costCol": "H",
         "imageCol": "I",
         "qtyCol": "1"
       }

@@ -343,12 +343,6 @@ export default function PurchaseScreen() {
     ? department : (allowedDepartments[0] ?? 'GM');
   const selectedMonthName = MONTH_NAMES[selectedPeriod.month];
   const targetTabName = `${selectedMonthName} ${effectiveDepartment === 'GM' ? 'GM' : 'PD'}`;
-  const nextMonth = useCallback(() => {
-    setResult(null);
-    setSelectedPeriod(({ month, year }) => month === 11
-      ? { month: 0, year: year + 1 }
-      : { month: month + 1, year });
-  }, []);
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   // If H changes, immediately remove any store that is no longer permitted.
@@ -743,24 +737,15 @@ export default function PurchaseScreen() {
             </View>
             <View style={[styles.storeControls, isTotal && { marginTop: 6 }]}>
               <Pressable
-                onPress={nextMonth}
+                onPress={() => { setPickerYear(selectedPeriod.year); setMonthPickerOpen(true); }}
                 style={({ pressed }) => [styles.storeTitlePress, pressed && styles.pressed]}
                 accessibilityRole="button"
-                accessibilityLabel={`Selected ${selectedMonthName} ${selectedPeriod.year}. Tap for next month.`}
-                testID="purchase-month-next"
+                accessibilityLabel={`Selected ${selectedMonthName} ${selectedPeriod.year}. Tap to open month and year list.`}
+                testID="purchase-month-dropdown"
               >
                 <Text style={[styles.month, { color: colors.mutedForeground, fontSize: 14 * fs }]}>
                   {selectedMonthName} {selectedPeriod.year}
                 </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => { setPickerYear(selectedPeriod.year); setMonthPickerOpen(true); }}
-                style={({ pressed }) => [styles.storeChevron, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Open month and year dropdown"
-                testID="purchase-month-dropdown"
-              >
-                <Feather name="chevron-down" size={20} color={colors.primary} style={{ opacity: 0 }} />
               </Pressable>
             </View>
           </View>
