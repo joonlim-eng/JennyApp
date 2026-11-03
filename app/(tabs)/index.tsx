@@ -41,6 +41,18 @@ const bannerUrl = (id: string) => `https://drive.google.com/thumbnail?id=${id}&s
 const BANNER_INTERVAL = 5500; // INTERVAL
 const H_MARGIN = 8; // 본문 좌우 여백 (cart/scan과 동일)  마진
 
+// HOME 세로 비율 (기준: APK 갤럭시 화면, TOTAL 위 ~ 화면 아래 = 1)
+// 배너 = 나머지 전부 (약 28.1%) → 글씨가 커서 칸이 늘어나면 배너가 줄어서 받아줌
+const HOME_RATIO = {
+  total: 0.165,      // TOTAL 띠 (최소 높이)
+  gapTop: 0.0061,    // TOTAL ↔ 배너
+  gapMid: 0.0284,    // 배너 ↔ STORE
+  select: 0.2112,    // STORE / VENDOR / SAVED 묶음 (최소 높이)
+  selectGap: 0.0071, // 드롭다운 줄 사이
+  rest: 0.3081,      // 버튼 영역 + 하단 탭 자리 (최소 높이)
+  btnPos: 0.383,     // 그 안에서 버튼 위치 (0 = 위, 1 = 아래)
+};
+
 function notify(title: string, msg: string) {
   if (Platform.OS === 'web') window.alert(`${title}\n\n${msg}`);
   else Alert.alert(title, msg);
@@ -131,7 +143,8 @@ export default function HomeScreen() {
     });
 
   // 배너 높이 = TOTAL 띠 높이 × 1.7 (TOTAL 띠를 실제로 재서 맞춤)
-  const [bandH, setBandH] = useState(0);
+  const [bodyH, setBodyH] = useState(0);   // TOTAL 위 ~ 화면 아래 높이 (실측)
+  const [bannerH, setBannerH] = useState(0); // 배너 칸 높이 (실측)
 
   const totalColor = c('home.totalCardColor', colors.totalCard ?? colors.primary);
   const loadColor = c('home.loadColor', colors.loadBtn ?? colors.accent);
@@ -170,13 +183,12 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <View style={styles.body}>
+      <View style={styles.body} onLayout={(e) => setBodyH(e.nativeEvent.layout.height)}>  
 
         {/* TOTAL: 화면 폭 전체 띠 (TOTAL / 금액·개수 / GM·SHIP) */}
         <Pressable
           onPress={handleTotalPress}
-          onLayout={(e) => setBandH(Math.round(e.nativeEvent.layout.height))}
-          style={({ pressed }) => [styles.totalBand, { backgroundColor: totalColor }, pressed && { opacity: 0.95 }]}
+          style={({ pressed }) => [styles.totalBand, { backgroundColor: totalColor, minHeight: bodyH * HOME_RATIO.total }, pressed && { opacity: 0.95 }]}
         >
           <Text style={[styles.totalLabel, onBandText]}>{c('home.totalLabel', 'TOTAL')}</Text>
           <View style={[styles.totalRow, { alignItems: 'baseline' }]}>
@@ -209,10 +221,14 @@ export default function HomeScreen() {
         </Pressable>
 
         {/* 배너: 좌우 여백 안쪽 폭, 자동 + 손으로 넘김 */}
-        <BannerCarousel height={Math.round(bandH * 1.7)} />
+        <View style={{ height: bodyH * HOME_RATIO.gapTop }} />
+        <View style={styles.bannerSlot} onLayout={(e) => setBannerH(Math.floor(e.nativeEvent.layout.height))}>
+          <BannerCarousel height={bannerH} />
+        </View>
+        <View style={{ height: bodyH * HOME_RATIO.gapMid }} />
 
         {/* STORE / VENDOR 블록 */}
-        <View style={styles.selectGroup}>
+        <View style={{ minHeight: bodyH * HOME_RATIO.select, gap: bodyH * HOME_RATIO.selectGap }}>
           <Dropdown
             label={c('home.storeLabel', 'STORE')}
             placeholder="Select store"
@@ -220,6 +236,7 @@ export default function HomeScreen() {
             value={app.selectedStoreId}
             onChange={(id) => guardedChange('store', id)}
             testID="select-store"
+            fill
           />
           <Dropdown
             label={c('home.vendorLabel', 'VENDOR')}
@@ -228,6 +245,7 @@ export default function HomeScreen() {
             value={app.selectedVendorId}
             onChange={(id) => guardedChange('vendor', id)}
             testID="select-vendor"
+            fill
           />
           <Dropdown
             label={c('home.savedLabel', 'SAVED')}
@@ -237,17 +255,20 @@ export default function HomeScreen() {
             onChange={setSavedSelection}
             onDeleteOption={(id) => { app.deleteSavedCart(id); if (savedSelection === id) setSavedSelection(null); }}
             testID="saved-list"
+            fill
           />
         </View>
 
         {/* 버튼 4개: SAVED와 하단 탭 사이 세로 가운데 */}
-        <View style={[styles.buttonArea, Platform.OS === 'web' && !isPwaMobileLayout() && {justifyContent: 'flex-end', paddingBottom: 56,}]}>
-        <View style={[styles.buttonGrid, Platform.OS === 'web' && !isPwaMobileLayout() && { transform: [{ translateY: 0 }] }]}>
+        <View style={{ minHeight: bodyH * HOME_RATIO.rest }}>
+        <View style={{ flex: HOME_RATIO.btnPos }} />
+        <View style={styles.buttonGrid}>  
           <ActionButton icon={<Feather name="send" size={20} color={colors.sendBtnText ?? colors.actionBtnIcon ?? '#fff'} />} label={c('home.sendLabel', 'SEND')} color={c('home.sendColor', colors.sendBtn ?? colors.accent)} borderColor={colors.sendBtnBorder} textColor={colors.sendBtnText ?? colors.actionBtnText} onPress={handleSend} badge={app.cart.length} testID="btn-send" />
           <ActionButton icon={<MaterialCommunityIcons name="microsoft-excel" size={20} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.exportLabel', 'EXPORT')} color={c('home.exportColor', colors.exportBtn ?? colors.success)} textColor={colors.actionBtnText} onPress={handleExportOptions} testID="btn-export" />
           <ActionButton icon={<Feather name="save" size={20} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.saveLabel', 'SAVE')} color={c('home.saveColor', colors.saveBtn ?? colors.primary)} borderColor={colors.saveBtnBorder} textColor={colors.actionBtnText} onPress={handleSave} testID="btn-save" />
           <ActionButton icon={<Feather name="download" size={20} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.loadLabel', 'LOAD')} color={loadColor} textColor={colors.actionBtnText} onPress={handleLoad} highlight={!!savedSelection} ringColor={loadColor} badge={savedOptions.length} testID="btn-load" />
         </View>
+        <View style={{ flex: 1 - HOME_RATIO.btnPos }} />
         </View>
 
       </View>
@@ -439,10 +460,10 @@ function BannerCarousel({ height }: { height: number }) {
     return stop;
   }, [ids.length, width]);
 
-  if (ids.length === 0 || height <= 0) return null; // 그림이 없거나 TOTAL 높이 측정 전이면 숨김
+  if (ids.length === 0 || height <= 0) return null; // 그림이 없거나 배너 칸 측정 전이면 숨김
   
   return (
-    <View style={{ width, height, marginTop: 4 }}> 
+    <View style={{ width, height }}> 
       <ScrollView
         ref={scrollRef}
         horizontal
@@ -736,7 +757,7 @@ const styles = StyleSheet.create({
   logoutBtn: { padding: 8 },
   // TOTAL 카드
   totalBand: {
-  paddingHorizontal: 16, paddingVertical: 10,
+  paddingHorizontal: 16, paddingVertical: 10, justifyContent: 'center',
   borderTopLeftRadius: 16,  borderTopRightRadius: 16,  //타원
 },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
@@ -752,14 +773,13 @@ const styles = StyleSheet.create({
   bannerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.5)' },
   bannerDotOn: { width: 16, backgroundColor: '#fff' },
   // STORE / VENDOR
-  selectGroup: { gap: 5, marginTop: 20 },
+  bannerSlot: { flex: 1, minHeight: 0 },
   section: { marginBottom: 12 },
   sectionLabel: { fontSize: 11, fontFamily: 'Inter_700SemiBold', letterSpacing: 1.2, marginBottom: 6 },
   toggleRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginTop: 10, paddingHorizontal: 2 },
   toggleLabel: { fontFamily: 'Inter_500Medium' },
   // 버튼 4개
-  buttonArea: { flex: 1, justifyContent: 'center' },
-  buttonGrid: { flexDirection: 'row', gap: 2.5, paddingHorizontal: 0, transform: [{ translateY: -40 }] },
+  buttonGrid: { flexDirection: 'row', gap: 2.5, paddingHorizontal: 0 },
   actionWrap: { flex: 1, paddingBottom: 4 },
   actionDim: { opacity: 0.42 },
   actionRing: { position: 'absolute', top: -4, left: 0, right: 0, bottom: -4, borderRadius: 4, borderWidth: 2 },

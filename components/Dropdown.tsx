@@ -25,6 +25,7 @@ interface Props {
   onDeleteOption?: (value: string) => void;
   testID?: string;
   label?: string; // 넣으면 제목 + 드롭다운이 한 줄 상자로, 좌우 끝까지
+  fill?: boolean; // 넣으면 부모가 준 높이를 나눠서 채움 (HOME 비율 레이아웃용)
 }
 
 export default function Dropdown({
@@ -35,6 +36,7 @@ export default function Dropdown({
   onDeleteOption,
   testID,
   label,
+  fill,
 }: Props) {
   const colors = useColors();
   const fs = useFontScale();
@@ -48,6 +50,7 @@ export default function Dropdown({
         style={({ pressed }) => [
           styles.trigger,
           label ? styles.triggerBar : null,
+          fill ? { flex: 1 } : null,
           { backgroundColor: colors.card, borderColor: colors.border },
           pressed && { opacity: 0.7 },
         ]}
