@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isPwaMobileLayout } from '@/lib/pwa';
 import { Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Feather, MaterialCommunityIcons } from '@/components/AppIcon';
@@ -42,7 +43,7 @@ export default function SettingsScreen() {
   const app = useApp();
   const [open, setOpen] = useState<Section | null>(null);
 
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' && !isPwaMobileLayout() ? 67 : insets.top; // mobile web/PWA → Android layout
 
   if (app.session?.role !== 'master') {
     return (

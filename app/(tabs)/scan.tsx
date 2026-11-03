@@ -17,6 +17,9 @@ import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { useApp, useFontScale, Product } from '@/context/AppContext';
 import ItemCard from '@/components/ItemCard';
+// web/PWA only: native builds resolve this to a no-op stub (WebBarcodeScanner.tsx)
+import WebBarcodeScanner, { isWebCameraSupported } from '@/components/WebBarcodeScanner';
+import { isPwaMobileLayout } from '@/lib/pwa';
 
 export default function ScanScreen() {
   const colors = useColors();
@@ -39,7 +42,7 @@ export default function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const lastScanRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
   const flatListRef = useRef<FlatList>(null);
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' && !isPwaMobileLayout() ? 67 : insets.top; // mobile web/PWA → Android layout
 
   // 벤더 토글 및 자동 저장 로직
   const handleVendorToggle = useCallback(() => {
@@ -271,12 +274,17 @@ const listData = React.useMemo(() => {
         {cameraOn && isFocused && (
           <View style={styles.cameraBox}>
             {Platform.OS === 'web' ? (
+              isWebCameraSupported() ? (
+                // PWA / web: getUserMedia camera + barcode decoding (web only)
+                <WebBarcodeScanner style={styles.camera} onBarcodeScanned={handleBarcode} />
+              ) : (
               <View style={[styles.webCameraFallback, { backgroundColor: colors.muted }]}>
                 <MaterialCommunityIcons name="barcode-scan" size={32} color={colors.mutedForeground} />
                 <Text style={[styles.webCameraText, { color: colors.mutedForeground }]}>
                   Barcode scanning works on your phone{'\n'}Type a UPC in the search box below
                 </Text>
               </View>
+              )
             ) : (
               <CameraView
                 style={styles.camera}

@@ -22,6 +22,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isPwaMobileLayout } from '@/lib/pwa';
 import { Feather, MaterialCommunityIcons } from '@/components/AppIcon';
 import { useColors } from '@/hooks/useColors';
 import { useApp, useFontScale, calcPrice } from '@/context/AppContext';
@@ -61,7 +62,7 @@ export default function HomeScreen() {
   const fs = useFontScale();
   const app = useApp();
 
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' && !isPwaMobileLayout() ? 0 : insets.top; // mobile web/PWA → Android layout
   const c = (k: string, f: string) => app.appearance[k] || f;
 
   // --- 비즈니스 로직 훅(Hook) 호출 ---
@@ -141,7 +142,7 @@ export default function HomeScreen() {
   return (
     <View style={[styles.container, { backgroundColor: c('home.bg', colors.background), paddingTop: topPad }]}>
       
-      <View style={[styles.header, { paddingHorizontal: 8, paddingTop: 0 }]}>  //상단 마진
+      <View style={[styles.header, { paddingHorizontal: 8, paddingTop: 0 }]}>
         <View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
             <Text style={[styles.brand, { color: c('home.brandColor', colors.primary), fontSize: 20 * fs }]} onPress={handleCheckVersion}>
@@ -240,8 +241,8 @@ export default function HomeScreen() {
         </View>
 
         {/* 버튼 4개: SAVED와 하단 탭 사이 세로 가운데 */}
-        <View style={styles.buttonArea}>
-        <View style={styles.buttonGrid}>
+        <View style={[styles.buttonArea, Platform.OS === 'web' && !isPwaMobileLayout() && {justifyContent: 'flex-end', paddingBottom: 56,}]}>
+        <View style={[styles.buttonGrid, Platform.OS === 'web' && !isPwaMobileLayout() && { transform: [{ translateY: 0 }] }]}>
           <ActionButton icon={<Feather name="send" size={20} color={colors.sendBtnText ?? colors.actionBtnIcon ?? '#fff'} />} label={c('home.sendLabel', 'SEND')} color={c('home.sendColor', colors.sendBtn ?? colors.accent)} borderColor={colors.sendBtnBorder} textColor={colors.sendBtnText ?? colors.actionBtnText} onPress={handleSend} badge={app.cart.length} testID="btn-send" />
           <ActionButton icon={<MaterialCommunityIcons name="microsoft-excel" size={20} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.exportLabel', 'EXPORT')} color={c('home.exportColor', colors.exportBtn ?? colors.success)} textColor={colors.actionBtnText} onPress={handleExportOptions} testID="btn-export" />
           <ActionButton icon={<Feather name="save" size={20} color={colors.actionBtnIcon ?? '#fff'} />} label={c('home.saveLabel', 'SAVE')} color={c('home.saveColor', colors.saveBtn ?? colors.primary)} borderColor={colors.saveBtnBorder} textColor={colors.actionBtnText} onPress={handleSave} testID="btn-save" />
@@ -439,9 +440,9 @@ function BannerCarousel({ height }: { height: number }) {
   }, [ids.length, width]);
 
   if (ids.length === 0 || height <= 0) return null; // 그림이 없거나 TOTAL 높이 측정 전이면 숨김
-
+  
   return (
-    <View style={{ width, height, marginTop: 4 }}>  //배너
+    <View style={{ width, height, marginTop: 4 }}> 
       <ScrollView
         ref={scrollRef}
         horizontal

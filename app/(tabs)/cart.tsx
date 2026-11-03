@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isPwaMobileLayout } from '@/lib/pwa';
 import { MaterialCommunityIcons } from '@/components/AppIcon';
 import { useColors } from '@/hooks/useColors';
 import { useApp, useFontScale, Product } from '@/context/AppContext';
@@ -22,7 +23,7 @@ export default function CartScreen() {
   const app = useApp();
   const router = useRouter();
 
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' && !isPwaMobileLayout() ? 67 : insets.top; // mobile web/PWA → Android layout
 
   const items = React.useMemo(() => {
     return app.cart

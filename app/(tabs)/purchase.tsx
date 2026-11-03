@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isPwaMobileLayout } from '@/lib/pwa';
 import { Redirect, useFocusEffect } from 'expo-router';
 import { Feather } from '@/components/AppIcon';
 import { APP_BUILD_KEY, useApp, useFontScale } from '@/context/AppContext';
@@ -507,7 +508,7 @@ export default function PurchaseScreen() {
     () => overviewTheme(colors.primary, colors.card),
     [colors.primary, colors.card],
   );
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' && !isPwaMobileLayout() ? 67 : insets.top; // mobile web/PWA → Android layout
 
   const openLink = async (url: string) => {
     if (!/^https?:\/\//i.test(url)) return;
