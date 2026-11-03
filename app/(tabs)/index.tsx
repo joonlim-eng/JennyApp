@@ -143,7 +143,8 @@ export default function HomeScreen() {
     });
 
   // 배너 높이 = TOTAL 띠 높이 × 1.7 (TOTAL 띠를 실제로 재서 맞춤)
-  const [bodyH, setBodyH] = useState(0);   // TOTAL 위 ~ 화면 아래 높이 (실측)
+  const [bodyRawH, setBodyRawH] = useState(0); // TOTAL 위 ~ 화면 맨 아래 (실측, 시스템 바 포함)
+  const bodyH = Math.max(0, bodyRawH - insets.bottom); // 시스템 내비게이션 바 / 홈 인디케이터 제외
   const [bannerH, setBannerH] = useState(0); // 배너 칸 높이 (실측)
 
   const totalColor = c('home.totalCardColor', colors.totalCard ?? colors.primary);
@@ -183,7 +184,7 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <View style={styles.body} onLayout={(e) => setBodyH(e.nativeEvent.layout.height)}>  
+      <View style={styles.body} onLayout={(e) => setBodyRawH(e.nativeEvent.layout.height)}>  
 
         {/* TOTAL: 화면 폭 전체 띠 (TOTAL / 금액·개수 / GM·SHIP) */}
         <Pressable
